@@ -1,0 +1,97 @@
+{
+  "projectType": "framework",
+  "projectName": "WAPI",
+  "projectDescription": "Framework for developing WhatsApp bots: fast, secure, and elegant, powered by Baileys and TypeScript",
+  "theme": "palm",
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/bot-architecture",
+              "concepts/authentication",
+              "concepts/middleware",
+              "concepts/commands",
+              "concepts/context"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/handling-messages",
+              "guides/media-messages",
+              "guides/groups",
+              "guides/advanced-features"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Classes",
+            "pages": [
+              "api/bot",
+              "api/context",
+              "api/message-builder"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth/local",
+              "api/auth/redis",
+              "api/auth/mongo"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/utilities/jid",
+              "api/utilities/validators"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Middleware-based message processing",
+    "Command system with customizable prefixes",
+    "Multiple authentication strategies (Local, Redis, MongoDB)",
+    "QR and OTP login methods",
+    "Rich context API with media support",
+    "Group and contact caching",
+    "Built-in message builder utility"
+  ],
+  "publicApiSurface": [
+    "Bot",
+    "Context",
+    "LocalAuth",
+    "RedisAuth",
+    "MongoAuth",
+    "MessageBuilder",
+    "bot.use()",
+    "bot.command()",
+    "bot.login()",
+    "ctx.reply()",
+    "ctx.replyWithImage()",
+    "ctx.replyWithVideo()",
+    "ctx.replyWithAudio()"
+  ]
+}
