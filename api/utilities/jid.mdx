@@ -1,0 +1,408 @@
+---
+title: 'JID Utilities'
+description: 'Utilities for working with WhatsApp JIDs (Jabber IDs)'
+icon: 'at'
+---
+
+## Overview
+
+JIDs (Jabber IDs) are unique identifiers used in WhatsApp to identify users, groups, and other entities. A JID typically follows the format `user@server` where:
+
+- **user**: The unique identifier (phone number for users, group ID for groups)
+- **server**: The WhatsApp server domain (e.g., `s.whatsapp.net`, `g.us`, `lid`)
+
+The JID utilities module provides functions to parse, normalize, and validate WhatsApp JIDs.
+
+<Note>
+All JID utility functions accept `unknown` types and safely handle type conversion, making them safe to use with any input.
+</Note>
+
+---
+
+## Functions
+
+### decode()
+
+Decodes a JID string into its constituent parts.
+
+```typescript
+function decode(jid: unknown): IJidDecoded
+```
+
+<ParamField path="jid" type="unknown" required>
+  The JID to decode. Can be any type - will be converted to string internally.
+</ParamField>
+
+<ResponseField name="IJidDecoded" type="object">
+  An object containing the decoded JID components:
+  
+  <ResponseField name="jid" type="string">
+    The user/group identifier part (before the `@` symbol)
+  </ResponseField>
+  
+  <ResponseField name="server" type="string">
+    The server domain part (after the `@` symbol)
+  </ResponseField>
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { decode } from 'wapi/utils/jid';
+
+const decoded = decode('1234567890@s.whatsapp.net');
+console.log(decoded);
+// { jid: '1234567890', server: 's.whatsapp.net' }
+```
+
+```typescript With Device ID
+import { decode } from 'wapi/utils/jid';
+
+// JIDs may include device IDs (e.g., :0)
+const decoded = decode('1234567890:0@s.whatsapp.net');
+console.log(decoded);
+// { jid: '1234567890', server: 's.whatsapp.net' }
+// Note: device ID is stripped out
+```
+
+```typescript Group JID
+import { decode } from 'wapi/utils/jid';
+
+const decoded = decode('120363012345678901@g.us');
+console.log(decoded);
+// { jid: '120363012345678901', server: 'g.us' }
+```
+</CodeGroup>
+
+---
+
+### normalize()
+
+Normalizes a JID by removing device identifiers and ensuring consistent formatting.
+
+```typescript
+function normalize(jid: unknown): string
+```
+
+<ParamField path="jid" type="unknown" required>
+  The JID to normalize. Can be any type - will be converted to string internally.
+</ParamField>
+
+<ResponseField name="string" type="string">
+  The normalized JID in the format `user@server`
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Remove Device ID
+import { normalize } from 'wapi/utils/jid';
+
+const normalized = normalize('1234567890:0@s.whatsapp.net');
+console.log(normalized);
+// '1234567890@s.whatsapp.net'
+```
+
+```typescript Already Normalized
+import { normalize } from 'wapi/utils/jid';
+
+const normalized = normalize('1234567890@s.whatsapp.net');
+console.log(normalized);
+// '1234567890@s.whatsapp.net'
+```
+
+```typescript In Message Handler
+import { normalize } from 'wapi/utils/jid';
+
+command('ban', async (ctx) => {
+  const mentionedJid = ctx.message.mentionedJid?.[0];
+  if (!mentionedJid) return;
+  
+  // Normalize the JID before storing or comparing
+  const normalizedJid = normalize(mentionedJid);
+  await banUser(normalizedJid);
+});
+```
+</CodeGroup>
+
+<Note>
+Normalizing JIDs is important when storing or comparing them, as WhatsApp may send JIDs with device identifiers that should be ignored for identification purposes.
+</Note>
+
+---
+
+### isGroup()
+
+Checks if a JID represents a WhatsApp group.
+
+```typescript
+function isGroup(jid: unknown): jid is `${string}@g.us`
+```
+
+<ParamField path="jid" type="unknown" required>
+  The JID to check. Can be any type - will be converted to string internally.
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the JID is a group (server is `g.us`), `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isGroup } from 'wapi/utils/jid';
+
+console.log(isGroup('120363012345678901@g.us'));
+// true
+
+console.log(isGroup('1234567890@s.whatsapp.net'));
+// false
+```
+
+```typescript Type Guard
+import { isGroup } from 'wapi/utils/jid';
+
+function handleMessage(jid: string) {
+  if (isGroup(jid)) {
+    // TypeScript knows jid is a group JID here
+    console.log('Message from group:', jid);
+  } else {
+    console.log('Private message from:', jid);
+  }
+}
+```
+
+```typescript In Middleware
+import { isGroup } from 'wapi/utils/jid';
+import { defineMiddleware } from 'wapi';
+
+export const groupOnly = defineMiddleware(async (ctx, next) => {
+  if (!isGroup(ctx.from)) {
+    await ctx.reply('This command only works in groups!');
+    return;
+  }
+  await next();
+});
+```
+</CodeGroup>
+
+<Warning>
+Group JIDs always use the `g.us` server domain. Don't confuse them with broadcast lists or other WhatsApp entities.
+</Warning>
+
+---
+
+### isPn()
+
+Checks if a JID represents a personal/private number (regular WhatsApp user).
+
+```typescript
+function isPn(jid: unknown): jid is `${string}@s.whatsapp.net`
+```
+
+<ParamField path="jid" type="unknown" required>
+  The JID to check. Can be any type - will be converted to string internally.
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the JID is a personal number (server is `s.whatsapp.net`), `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isPn } from 'wapi/utils/jid';
+
+console.log(isPn('1234567890@s.whatsapp.net'));
+// true
+
+console.log(isPn('120363012345678901@g.us'));
+// false
+```
+
+```typescript Validate DM Only
+import { isPn } from 'wapi/utils/jid';
+import { defineMiddleware } from 'wapi';
+
+export const dmOnly = defineMiddleware(async (ctx, next) => {
+  if (!isPn(ctx.from)) {
+    await ctx.reply('This command only works in DMs!');
+    return;
+  }
+  await next();
+});
+```
+
+```typescript Type Guard in Handler
+import { isPn, isGroup } from 'wapi/utils/jid';
+
+command('stats', async (ctx) => {
+  if (isPn(ctx.from)) {
+    // Show personal stats
+    await ctx.reply('Your personal stats...');
+  } else if (isGroup(ctx.from)) {
+    // Show group stats
+    await ctx.reply('Group stats...');
+  }
+});
+```
+</CodeGroup>
+
+---
+
+### isLid()
+
+Checks if a JID represents a LID (Local ID) - used for WhatsApp's newer identity system.
+
+```typescript
+function isLid(jid: unknown): jid is `${string}@lid`
+```
+
+<ParamField path="jid" type="unknown" required>
+  The JID to check. Can be any type - will be converted to string internally.
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the JID uses the `lid` server domain, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isLid } from 'wapi/utils/jid';
+
+console.log(isLid('abc123xyz@lid'));
+// true
+
+console.log(isLid('1234567890@s.whatsapp.net'));
+// false
+```
+
+```typescript Handle LID in Middleware
+import { isLid } from 'wapi/utils/jid';
+
+command('verify', async (ctx) => {
+  if (isLid(ctx.from)) {
+    await ctx.reply('LID-based accounts detected.');
+  } else {
+    await ctx.reply('Standard WhatsApp account.');
+  }
+});
+```
+</CodeGroup>
+
+<Note>
+LIDs are part of WhatsApp's newer identity system and may be encountered when working with certain types of accounts or business features.
+</Note>
+
+---
+
+## Type Definitions
+
+### IJidDecoded
+
+Interface representing a decoded JID.
+
+```typescript
+interface IJidDecoded {
+  jid: string;      // The user/group identifier
+  server: string;   // The server domain
+}
+```
+
+---
+
+## Common Patterns
+
+### Validating and Normalizing User Input
+
+<CodeGroup>
+```typescript Validate Before Use
+import { normalize, isPn } from 'wapi/utils/jid';
+
+command('add', async (ctx) => {
+  const userInput = ctx.args[0]; // e.g., "1234567890@s.whatsapp.net"
+  
+  // Normalize to remove device IDs
+  const normalized = normalize(userInput);
+  
+  // Validate it's a personal number
+  if (!isPn(normalized)) {
+    await ctx.reply('Please provide a valid user JID!');
+    return;
+  }
+  
+  // Safe to use
+  await addUserToList(normalized);
+});
+```
+
+```typescript Extract Phone Number
+import { decode, isPn } from 'wapi/utils/jid';
+
+function getPhoneNumber(jid: string): string | null {
+  if (!isPn(jid)) return null;
+  
+  const decoded = decode(jid);
+  return decoded.jid; // Returns just the phone number
+}
+
+const phone = getPhoneNumber('1234567890@s.whatsapp.net');
+console.log(phone); // '1234567890'
+```
+</CodeGroup>
+
+### Creating Type-Safe Handlers
+
+<CodeGroup>
+```typescript Discriminate by JID Type
+import { isGroup, isPn, isLid } from 'wapi/utils/jid';
+
+function handleMessageByType(jid: string, message: string) {
+  if (isGroup(jid)) {
+    // Handle group message
+    console.log('Group message:', message);
+  } else if (isPn(jid)) {
+    // Handle private message
+    console.log('Private message:', message);
+  } else if (isLid(jid)) {
+    // Handle LID message
+    console.log('LID message:', message);
+  } else {
+    console.log('Unknown JID type');
+  }
+}
+```
+
+```typescript Store Normalized JIDs
+import { normalize } from 'wapi/utils/jid';
+
+class UserDatabase {
+  private users = new Map<string, UserData>();
+  
+  addUser(jid: string, data: UserData) {
+    // Always normalize before storing
+    const normalized = normalize(jid);
+    this.users.set(normalized, data);
+  }
+  
+  getUser(jid: string): UserData | undefined {
+    // Always normalize before lookup
+    const normalized = normalize(jid);
+    return this.users.get(normalized);
+  }
+}
+```
+</CodeGroup>
+
+---
+
+## See Also
+
+- [Validators](/api/utilities/validators) - Additional validation utilities
+- [Commands](/api/commands) - Using JID utilities in commands
+- [Middleware](/api/middleware) - Creating JID-based middleware

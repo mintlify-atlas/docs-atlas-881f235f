@@ -1,0 +1,596 @@
+---
+title: "Working with Groups"
+description: "Manage group chats, access metadata, and build group-specific bot features"
+---
+
+## Overview
+
+WAPI provides comprehensive support for WhatsApp group chats. You can detect group messages, access group metadata, and leverage automatic caching for improved performance.
+
+<CardGroup cols={2}>
+  <Card title="Group Detection" icon="users">
+    Identify group messages and filter by chat type
+  </Card>
+  <Card title="Group Metadata" icon="info-circle">
+    Access group name, description, participants, and settings
+  </Card>
+  <Card title="Automatic Caching" icon="bolt">
+    Built-in cache for fast metadata access
+  </Card>
+  <Card title="Group Management" icon="gear">
+    Handle group-specific events and features
+  </Card>
+</CardGroup>
+
+## Detecting Group Messages
+
+You can identify whether a message came from a group or private chat using the `chat.type` property:
+
+```typescript
+bot.use(async (ctx, next) => {
+  if (ctx.chat.type === "group") {
+    console.log(`Message from group: ${ctx.chat.name}`);
+    console.log(`Group JID: ${ctx.chat.jid}`);
+    console.log(`Sender: ${ctx.from.name}`);
+  } else if (ctx.chat.type === "private") {
+    console.log(`Private message from: ${ctx.from.name}`);
+  }
+  
+  await next();
+});
+```
+
+<Note>
+Group JIDs always end with `@g.us`, while private chat JIDs end with `@s.whatsapp.net` or `@lid`. WAPI automatically sets `chat.type` based on the JID format (see `message.ts:52-78`).
+</Note>
+
+## Creating Group-Only Commands
+
+You can restrict commands to work only in groups:
+
+<Tabs>
+  <Tab title="Basic Filter">
+    ```typescript
+    bot.command("grouponly", async (ctx) => {
+      if (ctx.chat.type !== "group") {
+        await ctx.reply("This command only works in groups.");
+        return;
+      }
+      
+      await ctx.reply("This is a group command!");
+    });
+    ```
+  </Tab>
+  <Tab title="Middleware Filter">
+    ```typescript
+    // Create a middleware to filter group messages
+    const groupOnly = async (ctx, next) => {
+      if (ctx.chat.type === "group") {
+        await next();
+      }
+    };
+    
+    // Apply to specific commands
+    bot.use(groupOnly);
+    
+    bot.command("announce", async (ctx) => {
+      await ctx.reply("📢 Group announcement!");
+    });
+    ```
+  </Tab>
+  <Tab title="Private Only">
+    ```typescript
+    bot.command("private", async (ctx) => {
+      if (ctx.chat.type !== "private") {
+        await ctx.reply("This command only works in private chats.");
+        return;
+      }
+      
+      await ctx.reply("This is a private command!");
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Accessing Group Metadata
+
+The `groupMetadata()` method retrieves detailed information about a group:
+
+```typescript
+import { isGroup } from "wapi-core/utils";
+
+bot.command("groupinfo", async (ctx) => {
+  if (ctx.chat.type !== "group") {
+    await ctx.reply("This command only works in groups.");
+    return;
+  }
+  
+  // Get group metadata
+  const metadata = await ctx.bot.groupMetadata(ctx.chat.jid);
+  
+  if (!metadata) {
+    await ctx.reply("Failed to fetch group information.");
+    return;
+  }
+  
+  const info = [
+    `*${metadata.subject}*`,
+    ``,
+    `👥 Participants: ${metadata.participants.length}`,
+    `👑 Owner: ${metadata.owner}`,
+    `📅 Created: ${new Date(metadata.creation * 1000).toLocaleDateString()}`,
+    ``,
+    metadata.desc ? `📝 Description:\n${metadata.desc}` : "No description"
+  ].join("\n");
+  
+  await ctx.reply(info);
+});
+```
+
+<Note>
+The `groupMetadata()` method (from `bot.ts:332-342`) first checks the cache before making a network request. If the metadata is cached, it returns instantly.
+</Note>
+
+### Group Metadata Properties
+
+The `GroupMetadata` object includes:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `string` | Group JID (`@g.us`) |
+| `subject` | `string` | Group name/title |
+| `owner` | `string` | Owner's JID |
+| `creation` | `number` | Creation timestamp (Unix) |
+| `desc` | `string` | Group description |
+| `descId` | `string` | Description ID |
+| `participants` | `GroupParticipant[]` | Array of group members |
+| `size` | `number` | Number of participants |
+| `restrict` | `boolean` | Only admins can change settings |
+| `announce` | `boolean` | Only admins can send messages |
+
+### Working with Participants
+
+Group metadata includes participant information:
+
+```typescript
+bot.command("members", async (ctx) => {
+  if (ctx.chat.type !== "group") {
+    await ctx.reply("This command only works in groups.");
+    return;
+  }
+  
+  const metadata = await ctx.bot.groupMetadata(ctx.chat.jid);
+  if (!metadata) return;
+  
+  // Count by role
+  const admins = metadata.participants.filter(p => p.admin);
+  const members = metadata.participants.filter(p => !p.admin);
+  
+  // Get admin list
+  const adminList = admins
+    .map(p => `• @${p.id.split("@")[0]}`)
+    .join("\n");
+  
+  const info = [
+    `*${metadata.subject}*`,
+    ``,
+    `👥 Total: ${metadata.participants.length}`,
+    `👑 Admins: ${admins.length}`,
+    `👤 Members: ${members.length}`,
+    ``,
+    `*Administrators:*`,
+    adminList
+  ].join("\n");
+  
+  await ctx.reply(info, {
+    mentions: admins.map(p => p.id)
+  });
+});
+```
+
+## Group Caching System
+
+WAPI automatically caches group metadata for improved performance. The cache is managed in `cache/groups.ts`:
+
+```typescript
+import { groups } from "wapi-core/cache";
+
+// The cache is a Map<string, GroupMetadata>
+// It's automatically populated when messages are received
+
+bot.use(async (ctx, next) => {
+  if (ctx.chat.type === "group") {
+    // Check if group is in cache
+    if (groups.has(ctx.chat.jid)) {
+      const cached = groups.get(ctx.chat.jid);
+      console.log(`Cached group: ${cached.subject}`);
+    }
+  }
+  
+  await next();
+});
+```
+
+<Tip>
+When a message is received from a group, WAPI automatically fetches and caches the metadata if it's not already cached (see `bot.ts:167-173`). This means subsequent access is instant.
+</Tip>
+
+### Cache Behavior
+
+1. **Automatic Population**: When a message arrives from a new group, metadata is fetched and cached
+2. **Update on Changes**: When group settings change, the cache is invalidated and refreshed (see `bot.ts:222-237`)
+3. **Persistent During Session**: Cache persists for the entire bot session
+4. **Memory Efficient**: Only stores metadata for groups the bot interacts with
+
+## Practical Examples
+
+<Steps>
+  <Step title="Group Welcome Bot">
+    Welcome new members to the group:
+    
+    ```typescript
+    bot.use(async (ctx, next) => {
+      if (ctx.chat.type !== "group") {
+        await next();
+        return;
+      }
+      
+      // Check for group participant changes
+      // (You would need to track this via Baileys events)
+      
+      await next();
+    });
+    ```
+  </Step>
+  
+  <Step title="Admin-Only Commands">
+    Restrict commands to group administrators:
+    
+    ```typescript
+    async function isAdmin(ctx): Promise<boolean> {
+      if (ctx.chat.type !== "group") return false;
+      
+      const metadata = await ctx.bot.groupMetadata(ctx.chat.jid);
+      if (!metadata) return false;
+      
+      const participant = metadata.participants.find(
+        p => p.id === ctx.from.jid || p.id === ctx.from.pn
+      );
+      
+      return participant?.admin === "admin" || 
+             participant?.admin === "superadmin";
+    }
+    
+    bot.command("kick", async (ctx) => {
+      if (ctx.chat.type !== "group") {
+        await ctx.reply("This command only works in groups.");
+        return;
+      }
+      
+      if (!(await isAdmin(ctx))) {
+        await ctx.reply("This command is only for administrators.");
+        return;
+      }
+      
+      await ctx.reply("Admin command executed!");
+    });
+    ```
+  </Step>
+  
+  <Step title="Group Statistics">
+    Display group statistics and insights:
+    
+    ```typescript
+    bot.command("stats", async (ctx) => {
+      if (ctx.chat.type !== "group") {
+        await ctx.reply("This command only works in groups.");
+        return;
+      }
+      
+      const metadata = await ctx.bot.groupMetadata(ctx.chat.jid);
+      if (!metadata) return;
+      
+      const admins = metadata.participants.filter(
+        p => p.admin === "admin" || p.admin === "superadmin"
+      );
+      const members = metadata.participants.filter(p => !p.admin);
+      
+      const age = Math.floor(
+        (Date.now() - metadata.creation * 1000) / (1000 * 60 * 60 * 24)
+      );
+      
+      const stats = [
+        `📊 *Group Statistics*`,
+        ``,
+        `📱 Name: ${metadata.subject}`,
+        `👥 Members: ${metadata.participants.length}`,
+        `👑 Admins: ${admins.length}`,
+        `👤 Regular: ${members.length}`,
+        `📅 Age: ${age} days`,
+        ``,
+        `⚙️ Settings:`,
+        `• Messages: ${metadata.announce ? "Admins only" : "Everyone"}`,
+        `• Edit info: ${metadata.restrict ? "Admins only" : "Everyone"}`
+      ].join("\n");
+      
+      await ctx.reply(stats);
+    });
+    ```
+  </Step>
+  
+  <Step title="Group List Command">
+    List all groups the bot is part of:
+    
+    ```typescript
+    import { groups } from "wapi-core/cache";
+    
+    bot.command("groups", async (ctx) => {
+      if (groups.size === 0) {
+        await ctx.reply("No groups in cache yet.");
+        return;
+      }
+      
+      const groupList = Array.from(groups.values())
+        .map((g, i) => `${i + 1}. ${g.subject} (${g.participants.length} members)`)
+        .join("\n");
+      
+      await ctx.reply(`*Groups (${groups.size})*\n\n${groupList}`);
+    });
+    ```
+  </Step>
+  
+  <Step title="Group Announcement">
+    Create announcements with formatting:
+    
+    ```typescript
+    import { MessageBuilder } from "wapi-core/utils";
+    
+    bot.command("announce", async (ctx) => {
+      if (ctx.chat.type !== "group") {
+        await ctx.reply("This command only works in groups.");
+        return;
+      }
+      
+      if (!(await isAdmin(ctx))) {
+        await ctx.reply("Only admins can make announcements.");
+        return;
+      }
+      
+      const text = ctx.args.join(" ");
+      if (!text) {
+        await ctx.reply("Please provide announcement text.");
+        return;
+      }
+      
+      const message = new MessageBuilder()
+        .addTitle("ANNOUNCEMENT", 50)
+        .addBlankLine()
+        .addDescription(text)
+        .addBlankLine()
+        .addFooter(`By ${ctx.from.name}`, 50)
+        .build();
+      
+      await ctx.reply(message);
+    });
+    ```
+  </Step>
+</Steps>
+
+## Group JID Utilities
+
+WAPI provides utility functions for working with group JIDs (from `utils/jid.ts`):
+
+```typescript
+import { isGroup, decode, normalize } from "wapi-core/utils";
+
+bot.use(async (ctx, next) => {
+  // Check if JID is a group
+  if (isGroup(ctx.chat.jid)) {
+    console.log("This is a group chat");
+  }
+  
+  // Decode JID to get components
+  const decoded = decode(ctx.chat.jid);
+  console.log(decoded.jid);    // "123456789"
+  console.log(decoded.server); // "g.us"
+  
+  // Normalize JID format
+  const normalized = normalize(ctx.chat.jid);
+  console.log(normalized); // "123456789@g.us"
+  
+  await next();
+});
+```
+
+### JID Detection Functions
+
+```typescript
+import { isGroup, isPn, isLid } from "wapi-core/utils";
+
+// Check JID types
+const groupJid = "123456789@g.us";
+const phoneJid = "1234567890@s.whatsapp.net";
+const lidJid = "1234567890@lid";
+
+console.log(isGroup(groupJid)); // true
+console.log(isPn(phoneJid));    // true
+console.log(isLid(lidJid));     // true
+```
+
+## Group Event Handling
+
+WAPI automatically handles group updates via Baileys events (see `bot.ts:222-237`):
+
+```typescript
+// This happens automatically in WAPI
+// When groups are updated, the cache is refreshed
+
+bot.on("error", (error) => {
+  console.error("Bot error:", error);
+});
+
+// Monitor cache updates
+import { groups } from "wapi-core/cache";
+
+setInterval(() => {
+  console.log(`Cached groups: ${groups.size}`);
+}, 60000); // Log every minute
+```
+
+## Advanced Group Features
+
+<AccordionGroup>
+  <Accordion title="Track group message activity">
+    Count messages per group:
+    
+    ```typescript
+    const groupActivity = new Map<string, number>();
+    
+    bot.use(async (ctx, next) => {
+      if (ctx.chat.type === "group") {
+        const count = groupActivity.get(ctx.chat.jid) || 0;
+        groupActivity.set(ctx.chat.jid, count + 1);
+      }
+      await next();
+    });
+    
+    bot.command("activity", async (ctx) => {
+      if (ctx.chat.type !== "group") {
+        await ctx.reply("This command only works in groups.");
+        return;
+      }
+      
+      const count = groupActivity.get(ctx.chat.jid) || 0;
+      await ctx.reply(`This group has ${count} messages since bot started.`);
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Find common groups">
+    Find groups shared with a specific user:
+    
+    ```typescript
+    import { groups } from "wapi-core/cache";
+    
+    async function findCommonGroups(userJid: string): Promise<string[]> {
+      const commonGroups: string[] = [];
+      
+      for (const [jid, metadata] of groups.entries()) {
+        const isMember = metadata.participants.some(
+          p => p.id === userJid
+        );
+        
+        if (isMember) {
+          commonGroups.push(metadata.subject);
+        }
+      }
+      
+      return commonGroups;
+    }
+    
+    bot.command("commongroups", async (ctx) => {
+      const targetJid = ctx.mentions[0] || ctx.from.jid;
+      const common = await findCommonGroups(targetJid);
+      
+      if (common.length === 0) {
+        await ctx.reply("No common groups found.");
+        return;
+      }
+      
+      await ctx.reply(`Common groups:\n${common.join("\n")}`);
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Group-specific settings">
+    Store and retrieve group-specific configuration:
+    
+    ```typescript
+    interface GroupSettings {
+      welcomeMessage?: string;
+      prefix?: string;
+      language?: string;
+    }
+    
+    const groupSettings = new Map<string, GroupSettings>();
+    
+    bot.command("setwelcome", async (ctx) => {
+      if (ctx.chat.type !== "group") return;
+      
+      const message = ctx.args.join(" ");
+      if (!message) {
+        await ctx.reply("Provide a welcome message.");
+        return;
+      }
+      
+      const settings = groupSettings.get(ctx.chat.jid) || {};
+      settings.welcomeMessage = message;
+      groupSettings.set(ctx.chat.jid, settings);
+      
+      await ctx.reply("Welcome message updated!");
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Rate limiting per group">
+    Implement per-group rate limiting:
+    
+    ```typescript
+    const groupRateLimits = new Map<string, number>();
+    const RATE_LIMIT = 5; // messages per minute
+    
+    bot.use(async (ctx, next) => {
+      if (ctx.chat.type !== "group") {
+        await next();
+        return;
+      }
+      
+      const key = `${ctx.chat.jid}:${ctx.from.jid}`;
+      const now = Date.now();
+      const lastMessage = groupRateLimits.get(key) || 0;
+      
+      if (now - lastMessage < 60000 / RATE_LIMIT) {
+        // Rate limited
+        return;
+      }
+      
+      groupRateLimits.set(key, now);
+      await next();
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Cache First" icon="bolt">
+    Always check the cache before making network requests for group metadata
+  </Card>
+  <Card title="Validate Permissions" icon="shield">
+    Check if the bot and users have necessary permissions before group operations
+  </Card>
+  <Card title="Handle Updates" icon="refresh">
+    Be aware that group metadata can change; don't cache indefinitely
+  </Card>
+  <Card title="Respect Privacy" icon="lock">
+    Don't log or expose sensitive group information unnecessarily
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Advanced Features" icon="rocket" href="/guides/advanced-features">
+    Explore advanced bot patterns and utilities
+  </Card>
+  <Card title="Media Messages" icon="image" href="/guides/media-messages">
+    Send and receive media in groups
+  </Card>
+  <Card title="Handling Messages" icon="message" href="/guides/handling-messages">
+    Learn about message parsing and detection
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/bot">
+    Full API documentation for Bot class
+  </Card>
+</CardGroup>

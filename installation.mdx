@@ -1,0 +1,287 @@
+---
+title: Installation
+description: Get WAPI installed and ready for development
+---
+
+## Prerequisites
+
+Before installing WAPI, ensure your environment meets these requirements:
+
+<Note>
+  **Node.js 20.0.0 or higher** is required. WAPI is built with modern JavaScript features and requires a current Node.js version.
+</Note>
+
+Check your Node.js version:
+
+```bash
+node --version
+```
+
+If you need to update Node.js, visit [nodejs.org](https://nodejs.org) or use a version manager like [nvm](https://github.com/nvm-sh/nvm).
+
+## Installing WAPI
+
+<Steps>
+  <Step title="Install the package">
+    Choose your preferred package manager and install WAPI:
+
+    <CodeGroup>
+      ```bash npm
+      npm install @imjxsx/wapi
+      ```
+
+      ```bash pnpm
+      pnpm add @imjxsx/wapi
+      ```
+
+      ```bash yarn
+      yarn add @imjxsx/wapi
+      ```
+
+      ```bash bun
+      bun add @imjxsx/wapi
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Install QR code library (optional)">
+    If you plan to use QR code authentication, install the `qrcode` package:
+
+    <CodeGroup>
+      ```bash npm
+      npm install qrcode
+      npm install --save-dev @types/qrcode
+      ```
+
+      ```bash pnpm
+      pnpm add qrcode
+      pnpm add -D @types/qrcode
+      ```
+
+      ```bash yarn
+      yarn add qrcode
+      yarn add --dev @types/qrcode
+      ```
+
+      ```bash bun
+      bun add qrcode
+      bun add -d @types/qrcode
+      ```
+    </CodeGroup>
+
+    <Tip>
+      The QR code library is only needed if you want to display QR codes in the terminal. For OTP authentication, you don't need this package.
+    </Tip>
+  </Step>
+
+  <Step title="Install logger (optional)">
+    WAPI includes a default logger, but you can use the recommended logger for better formatting:
+
+    <CodeGroup>
+      ```bash npm
+      npm install @imjxsx/logger
+      ```
+
+      ```bash pnpm
+      pnpm add @imjxsx/logger
+      ```
+
+      ```bash yarn
+      yarn add @imjxsx/logger
+      ```
+
+      ```bash bun
+      bun add @imjxsx/logger
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Verify installation">
+    Create a simple test file to verify WAPI is installed correctly:
+
+    ```javascript test.js
+    import { Bot, LocalAuth } from "@imjxsx/wapi";
+
+    console.log("WAPI installed successfully!");
+    console.log("Bot:", typeof Bot);
+    console.log("LocalAuth:", typeof LocalAuth);
+    ```
+
+    Run the test:
+
+    ```bash
+    node test.js
+    ```
+
+    You should see output confirming the imports work:
+
+    ```
+    WAPI installed successfully!
+    Bot: function
+    LocalAuth: function
+    ```
+  </Step>
+</Steps>
+
+## Authentication Strategies
+
+WAPI supports multiple authentication backends. Install the dependencies for your chosen strategy:
+
+### Local File Storage (Default)
+
+No additional dependencies required. Perfect for development and single-instance deployments.
+
+```javascript
+import { LocalAuth } from "@imjxsx/wapi";
+
+const auth = new LocalAuth(uuid, "sessions");
+```
+
+### Redis Storage
+
+For production deployments with multiple instances:
+
+<CodeGroup>
+  ```bash npm
+  npm install ioredis
+  ```
+
+  ```bash pnpm
+  pnpm add ioredis
+  ```
+
+  ```bash yarn
+  yarn add ioredis
+  ```
+
+  ```bash bun
+  bun add ioredis
+  ```
+</CodeGroup>
+
+```javascript
+import { RedisAuth } from "@imjxsx/wapi";
+import Redis from "ioredis";
+
+const redis = new Redis();
+const auth = new RedisAuth(uuid, redis);
+```
+
+### MongoDB Storage
+
+For deployments using MongoDB:
+
+<CodeGroup>
+  ```bash npm
+  npm install mongodb
+  ```
+
+  ```bash pnpm
+  pnpm add mongodb
+  ```
+
+  ```bash yarn
+  yarn add mongodb
+  ```
+
+  ```bash bun
+  bun add mongodb
+  ```
+</CodeGroup>
+
+```javascript
+import { MongoAuth } from "@imjxsx/wapi";
+import { MongoClient } from "mongodb";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const auth = new MongoAuth(uuid, client, "myDatabase");
+```
+
+## TypeScript Configuration
+
+<Tip>
+  WAPI is built with TypeScript and includes full type definitions out of the box.
+</Tip>
+
+If you're using TypeScript, ensure your `tsconfig.json` includes these settings:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "strict": true
+  }
+}
+```
+
+## Package Manager Notes
+
+### Using ESM Modules
+
+WAPI is an ESM-only package. Make sure your `package.json` includes:
+
+```json package.json
+{
+  "type": "module"
+}
+```
+
+<Warning>
+  WAPI does not support CommonJS (`require()`). You must use ES modules (`import`).
+</Warning>
+
+### Using with Bun
+
+WAPI works seamlessly with Bun:
+
+```bash
+bun add @imjxsx/wapi
+bun run index.js
+```
+
+### Using with tsx (TypeScript)
+
+For running TypeScript files directly during development:
+
+```bash
+npm install --save-dev tsx
+npx tsx index.ts
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Build your first WhatsApp bot
+  </Card>
+  <Card title="Authentication Guide" icon="key" href="/concepts/authentication">
+    Learn about authentication strategies
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Module Not Found Error
+
+If you see `ERR_MODULE_NOT_FOUND`, ensure:
+- Your `package.json` has `"type": "module"`
+- You're using `import` instead of `require`
+- File extensions are included in imports (`.js`)
+
+### Node Version Error
+
+If you encounter compatibility errors, verify you're using Node.js 20.0.0 or higher:
+
+```bash
+node --version
+```
+
+Update Node.js if needed using [nvm](https://github.com/nvm-sh/nvm):
+
+```bash
+nvm install 20
+nvm use 20
+```

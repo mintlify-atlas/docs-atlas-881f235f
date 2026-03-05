@@ -1,0 +1,144 @@
+---
+title: Introduction
+description: A modern WhatsApp bot framework built on Baileys, designed for developers who value speed, security, and elegance
+---
+
+## What is WAPI?
+
+WAPI is a powerful framework for building WhatsApp bots with TypeScript/JavaScript. Built on top of [Baileys](https://github.com/WhiskeySockets/Baileys), WAPI provides a clean, intuitive API that makes bot development fast and enjoyable.
+
+<CardGroup cols={2}>
+  <Card title="Fast Development" icon="rocket">
+    Get your bot running in minutes with an intuitive API and minimal boilerplate
+  </Card>
+  <Card title="Type-Safe" icon="shield-check">
+    Built 100% in TypeScript with full type definitions for a better developer experience
+  </Card>
+  <Card title="Production Ready" icon="server">
+    Multiple authentication strategies including Local, Redis, and MongoDB
+  </Card>
+  <Card title="Feature Rich" icon="sparkles">
+    Middleware system, command handling, context API, and rich message utilities
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Middleware System
+
+WAPI includes a powerful middleware system similar to Express.js, allowing you to intercept and process messages before they reach command handlers:
+
+```javascript
+bot.use(async (ctx, next) => {
+  bot.logger.info(`New message from '${ctx.from.name}' in '${ctx.chat.name}'`);
+  await next();
+});
+```
+
+### Command Handling
+
+Define commands with a simple, declarative API. Commands support custom prefixes (`/` and `!` by default) and provide full access to message context:
+
+```javascript
+bot.command("ping", async (ctx) => {
+  await ctx.reply(`> ¡Pong! \`\`\`${bot.ping.toFixed(2)} ms\`\`\``);
+});
+```
+
+### Rich Context API
+
+Every message comes with a rich context object providing:
+- **Message details**: Text content, media, quoted messages
+- **Sender information**: Name, phone number, JID
+- **Chat information**: Group or private chat details
+- **Utility methods**: `reply()`, `replyWithImage()`, `replyWithVideo()`, and more
+- **Parsed data**: Links, mentions, command arguments
+
+### Multiple Authentication Strategies
+
+WAPI supports flexible authentication backends to suit your infrastructure:
+
+<CodeGroup>
+```javascript LocalAuth
+import { Bot, LocalAuth } from "@imjxsx/wapi";
+
+const auth = new LocalAuth(uuid, "sessions");
+const bot = new Bot(uuid, auth, account);
+```
+
+```javascript RedisAuth
+import { Bot, RedisAuth } from "@imjxsx/wapi";
+
+const auth = new RedisAuth(uuid, redisClient);
+const bot = new Bot(uuid, auth, account);
+```
+
+```javascript MongoAuth
+import { Bot, MongoAuth } from "@imjxsx/wapi";
+
+const auth = new MongoAuth(uuid, mongoClient, "database");
+const bot = new Bot(uuid, auth, account);
+```
+</CodeGroup>
+
+### Flexible Login Methods
+
+Choose between QR code or OTP (One-Time Password) authentication:
+
+```javascript
+// QR Code login (scan with WhatsApp)
+await bot.login("qr");
+
+// OTP login (phone number required)
+await bot.login("otp");
+```
+
+## Why Choose WAPI?
+
+<Note>
+  WAPI abstracts away the complexity of WhatsApp's protocol while giving you full control over your bot's behavior.
+</Note>
+
+- **Developer Experience First**: Clean API, full TypeScript support, comprehensive error handling
+- **Battle Tested**: Built on Baileys, the most reliable WhatsApp Web API library
+- **Scalable**: Support for Redis and MongoDB means you can scale horizontally
+- **Active Development**: Regular updates and compatibility with the latest WhatsApp features
+
+## Quick Example
+
+Here's a complete bot in just a few lines:
+
+```javascript
+import { Bot, LocalAuth } from "@imjxsx/wapi";
+import QRCode from "qrcode";
+
+const uuid = "1f1332f4-7c2a-4b88-b4ca-bd56d07ed713";
+const auth = new LocalAuth(uuid, "sessions");
+const bot = new Bot(uuid, auth, { jid: "", pn: "", name: "" });
+
+bot.on("qr", async (qr) => {
+  qr = await QRCode.toString(qr, { type: "terminal", small: true });
+  console.log(qr);
+});
+
+bot.on("open", (account) => {
+  bot.logger.info(`Logged in as @${account.name}`);
+});
+
+bot.command("ping", async (ctx) => {
+  await ctx.reply(`Pong! ${bot.ping.toFixed(2)} ms`);
+});
+
+await bot.login("qr");
+```
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install WAPI and set up your development environment
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Build your first WhatsApp bot in under 5 minutes
+  </Card>
+</CardGroup>

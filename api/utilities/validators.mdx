@@ -1,0 +1,864 @@
+---
+title: 'Validators'
+description: 'Type-safe validation utilities for runtime type checking'
+icon: 'check-circle'
+---
+
+## Overview
+
+The validators module provides a comprehensive set of type-guard functions for runtime type checking in TypeScript. Each function not only checks the type at runtime but also acts as a type guard, allowing TypeScript to narrow types automatically.
+
+<Note>
+All validator functions return boolean values and can be used as type guards in TypeScript, providing both runtime safety and compile-time type narrowing.
+</Note>
+
+---
+
+## Type Validators
+
+### isString()
+
+Checks if a value is a string.
+
+```typescript
+function isString(arg: unknown): arg is string
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value is a string, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isString } from 'wapi/utils/validators';
+
+console.log(isString('hello'));     // true
+console.log(isString(123));         // false
+console.log(isString(null));        // false
+```
+
+```typescript Type Guard
+import { isString } from 'wapi/utils/validators';
+
+function processValue(value: unknown) {
+  if (isString(value)) {
+    // TypeScript knows value is a string here
+    console.log(value.toUpperCase());
+  }
+}
+```
+
+```typescript Validate Command Arguments
+import { isString } from 'wapi/utils/validators';
+
+command('echo', async (ctx) => {
+  const message = ctx.args[0];
+  
+  if (!isString(message)) {
+    await ctx.reply('Please provide a string message!');
+    return;
+  }
+  
+  await ctx.reply(message);
+});
+```
+</CodeGroup>
+
+---
+
+### isNumber()
+
+Checks if a value is a valid number (not NaN).
+
+```typescript
+function isNumber(arg: unknown): arg is number
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value is a number and not NaN, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isNumber } from 'wapi/utils/validators';
+
+console.log(isNumber(42));          // true
+console.log(isNumber(3.14));        // true
+console.log(isNumber(NaN));         // false
+console.log(isNumber('123'));       // false
+```
+
+```typescript Parse and Validate
+import { isNumber } from 'wapi/utils/validators';
+
+command('multiply', async (ctx) => {
+  const num = parseFloat(ctx.args[0]);
+  
+  if (!isNumber(num)) {
+    await ctx.reply('Please provide a valid number!');
+    return;
+  }
+  
+  const result = num * 2;
+  await ctx.reply(`Result: ${result}`);
+});
+```
+
+```typescript Validate Configuration
+import { isNumber } from 'wapi/utils/validators';
+
+interface Config {
+  timeout?: unknown;
+}
+
+function loadConfig(config: Config) {
+  const timeout = config.timeout;
+  
+  if (timeout !== undefined && !isNumber(timeout)) {
+    throw new Error('timeout must be a number');
+  }
+  
+  // TypeScript knows timeout is number | undefined here
+  return { timeout: timeout ?? 5000 };
+}
+```
+</CodeGroup>
+
+<Warning>
+Note that `isNumber()` returns `false` for `NaN`, even though `typeof NaN === 'number'`. This is intentional to help catch invalid numeric operations.
+</Warning>
+
+---
+
+### isObject()
+
+Checks if a value is an object (excluding null).
+
+```typescript
+function isObject(arg: unknown): arg is object
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value is an object and not null, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isObject } from 'wapi/utils/validators';
+
+console.log(isObject({ name: 'John' }));  // true
+console.log(isObject([]));                // true (arrays are objects)
+console.log(isObject(null));              // false
+console.log(isObject('string'));          // false
+```
+
+```typescript Validate JSON Response
+import { isObject } from 'wapi/utils/validators';
+
+async function fetchData(url: string) {
+  const response = await fetch(url);
+  const data = await response.json();
+  
+  if (!isObject(data)) {
+    throw new Error('Expected object response');
+  }
+  
+  // Safe to access object properties
+  return data;
+}
+```
+
+```typescript Type Guard for Configuration
+import { isObject } from 'wapi/utils/validators';
+
+function processConfig(config: unknown) {
+  if (!isObject(config)) {
+    throw new Error('Config must be an object');
+  }
+  
+  // TypeScript knows config is an object here
+  // Can safely check for properties
+  if ('apiKey' in config) {
+    console.log('API key found');
+  }
+}
+```
+</CodeGroup>
+
+<Note>
+Remember that arrays, functions, and class instances are also objects in JavaScript. Use `isArray()` if you specifically need to check for arrays.
+</Note>
+
+---
+
+### isArray()
+
+Checks if a value is an array.
+
+```typescript
+function isArray(arg: unknown): arg is unknown[]
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value is an array, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isArray } from 'wapi/utils/validators';
+
+console.log(isArray([1, 2, 3]));    // true
+console.log(isArray([]));           // true
+console.log(isArray({ 0: 'a' }));   // false
+console.log(isArray('array'));      // false
+```
+
+```typescript Process Array Arguments
+import { isArray, isString } from 'wapi/utils/validators';
+
+command('list', async (ctx) => {
+  const items = ctx.data.items; // unknown type from database
+  
+  if (!isArray(items)) {
+    await ctx.reply('No items found!');
+    return;
+  }
+  
+  // TypeScript knows items is an array here
+  const validItems = items.filter(isString);
+  await ctx.reply(`Items: ${validItems.join(', ')}`);
+});
+```
+
+```typescript Validate API Response
+import { isArray } from 'wapi/utils/validators';
+
+interface User {
+  id: string;
+  name: string;
+}
+
+async function getUsers(): Promise<User[]> {
+  const response = await fetch('/api/users');
+  const data = await response.json();
+  
+  if (!isArray(data)) {
+    throw new Error('Expected array of users');
+  }
+  
+  return data as User[];
+}
+```
+</CodeGroup>
+
+---
+
+### isBuffer()
+
+Checks if a value is a Node.js Buffer.
+
+```typescript
+function isBuffer(arg: unknown): arg is Buffer
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value is a Buffer, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isBuffer } from 'wapi/utils/validators';
+
+const buf = Buffer.from('hello');
+const arr = new Uint8Array([1, 2, 3]);
+
+console.log(isBuffer(buf));         // true
+console.log(isBuffer(arr));         // false
+console.log(isBuffer('string'));    // false
+```
+
+```typescript Handle File Upload
+import { isBuffer } from 'wapi/utils/validators';
+import { writeFile } from 'fs/promises';
+
+command('upload', async (ctx) => {
+  const fileData = ctx.message.media;
+  
+  if (!isBuffer(fileData)) {
+    await ctx.reply('No valid file data received!');
+    return;
+  }
+  
+  // Safe to write buffer to file
+  await writeFile('./uploads/file.bin', fileData);
+  await ctx.reply('File uploaded successfully!');
+});
+```
+
+```typescript Process Binary Data
+import { isBuffer, isUint8Array } from 'wapi/utils/validators';
+
+function processBinaryData(data: unknown): Buffer {
+  if (isBuffer(data)) {
+    return data;
+  } else if (isUint8Array(data)) {
+    return Buffer.from(data);
+  } else {
+    throw new Error('Expected Buffer or Uint8Array');
+  }
+}
+```
+</CodeGroup>
+
+---
+
+### isUint8Array()
+
+Checks if a value is a Uint8Array.
+
+```typescript
+function isUint8Array(arg: unknown): arg is Uint8Array
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value is a Uint8Array, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isUint8Array } from 'wapi/utils/validators';
+
+const arr = new Uint8Array([1, 2, 3]);
+const buf = Buffer.from([1, 2, 3]);
+
+console.log(isUint8Array(arr));     // true
+console.log(isUint8Array(buf));     // true (Buffer extends Uint8Array)
+console.log(isUint8Array([1, 2]));  // false
+```
+
+```typescript Handle Binary Protocols
+import { isUint8Array } from 'wapi/utils/validators';
+
+function encodeMessage(data: unknown): Uint8Array {
+  if (isUint8Array(data)) {
+    return data;
+  }
+  
+  // Convert other types to Uint8Array
+  const encoder = new TextEncoder();
+  return encoder.encode(String(data));
+}
+```
+
+```typescript WebSocket Binary Messages
+import { isUint8Array } from 'wapi/utils/validators';
+
+function handleWebSocketMessage(message: unknown) {
+  if (isUint8Array(message)) {
+    console.log('Received binary message:', message.length, 'bytes');
+    // Process binary data
+  } else {
+    console.log('Received text message');
+    // Process text data
+  }
+}
+```
+</CodeGroup>
+
+<Note>
+Node.js `Buffer` extends `Uint8Array`, so `isUint8Array()` will return `true` for Buffers. Use `isBuffer()` if you specifically need to distinguish Buffers from other Uint8Arrays.
+</Note>
+
+---
+
+### isError()
+
+Checks if a value is an Error instance.
+
+```typescript
+function isError(arg: unknown): arg is Error
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value is an Error instance, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isError } from 'wapi/utils/validators';
+
+console.log(isError(new Error('oops')));        // true
+console.log(isError(new TypeError('wrong')));   // true
+console.log(isError({ message: 'error' }));     // false
+console.log(isError('error string'));           // false
+```
+
+```typescript Error Handling
+import { isError } from 'wapi/utils/validators';
+
+command('risky', async (ctx) => {
+  try {
+    await someRiskyOperation();
+  } catch (err) {
+    if (isError(err)) {
+      // TypeScript knows err is Error here
+      await ctx.reply(`Error: ${err.message}`);
+      console.error(err.stack);
+    } else {
+      // Handle non-Error throws
+      await ctx.reply(`Unknown error: ${String(err)}`);
+    }
+  }
+});
+```
+
+```typescript Logging Helper
+import { isError } from 'wapi/utils/validators';
+
+function logError(error: unknown) {
+  if (isError(error)) {
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
+    if ('code' in error) {
+      console.error('Code:', error.code);
+    }
+  } else {
+    console.error('Non-Error thrown:', error);
+  }
+}
+```
+</CodeGroup>
+
+---
+
+### isLink()
+
+Checks if a value is a valid URL.
+
+```typescript
+function isLink(arg: unknown): arg is NonNullable<string>
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value can be parsed as a valid URL, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isLink } from 'wapi/utils/validators';
+
+console.log(isLink('https://example.com'));         // true
+console.log(isLink('http://localhost:3000'));       // true
+console.log(isLink('ftp://files.example.com'));     // true
+console.log(isLink('not a url'));                   // false
+console.log(isLink('example.com'));                 // false (no protocol)
+```
+
+```typescript Validate User Input
+import { isLink } from 'wapi/utils/validators';
+
+command('shorten', async (ctx) => {
+  const url = ctx.args[0];
+  
+  if (!isLink(url)) {
+    await ctx.reply('Please provide a valid URL!');
+    return;
+  }
+  
+  const shortened = await shortenUrl(url);
+  await ctx.reply(`Shortened: ${shortened}`);
+});
+```
+
+```typescript Extract and Validate Links
+import { isLink } from 'wapi/utils/validators';
+
+function extractLinks(text: string): string[] {
+  const words = text.split(/\s+/);
+  return words.filter(isLink);
+}
+
+const text = 'Check out https://example.com and https://github.com';
+const links = extractLinks(text);
+console.log(links);
+// ['https://example.com', 'https://github.com']
+```
+
+```typescript Middleware: Block Links
+import { isLink } from 'wapi/utils/validators';
+import { defineMiddleware } from 'wapi';
+
+export const noLinks = defineMiddleware(async (ctx, next) => {
+  const words = ctx.message.text?.split(/\s+/) ?? [];
+  const hasLinks = words.some(isLink);
+  
+  if (hasLinks) {
+    await ctx.reply('Links are not allowed in this group!');
+    return;
+  }
+  
+  await next();
+});
+```
+</CodeGroup>
+
+<Warning>
+The URL must include a protocol (e.g., `http://`, `https://`). Plain domain names like `example.com` will return `false`.
+</Warning>
+
+---
+
+### isUUID()
+
+Checks if a value is a valid UUID (v4 format).
+
+```typescript
+function isUUID(arg: unknown): arg is UUID
+```
+
+<ParamField path="arg" type="unknown" required>
+  The value to check
+</ParamField>
+
+<ResponseField name="boolean" type="boolean">
+  `true` if the value matches the UUID v4 format, `false` otherwise
+</ResponseField>
+
+#### Example
+
+<CodeGroup>
+```typescript Basic Usage
+import { isUUID } from 'wapi/utils/validators';
+
+console.log(isUUID('550e8400-e29b-41d4-a716-446655440000'));  // true
+console.log(isUUID('not-a-uuid'));                           // false
+console.log(isUUID('12345'));                                // false
+```
+
+```typescript Validate Database IDs
+import { isUUID } from 'wapi/utils/validators';
+
+command('get-user', async (ctx) => {
+  const userId = ctx.args[0];
+  
+  if (!isUUID(userId)) {
+    await ctx.reply('Please provide a valid user ID (UUID)!');
+    return;
+  }
+  
+  const user = await database.getUser(userId);
+  await ctx.reply(`User: ${user.name}`);
+});
+```
+
+```typescript Type-Safe API Client
+import { isUUID } from 'wapi/utils/validators';
+import { UUID } from 'node:crypto';
+
+class UserAPI {
+  async getUser(id: string): Promise<User> {
+    if (!isUUID(id)) {
+      throw new Error('Invalid user ID format');
+    }
+    
+    // TypeScript knows id is UUID here
+    return await this.fetchUser(id);
+  }
+  
+  private async fetchUser(id: UUID): Promise<User> {
+    // Implementation
+  }
+}
+```
+
+```typescript Generate and Validate Session IDs
+import { randomUUID } from 'node:crypto';
+import { isUUID } from 'wapi/utils/validators';
+
+class SessionManager {
+  createSession(): string {
+    return randomUUID();
+  }
+  
+  validateSession(sessionId: unknown): boolean {
+    return isUUID(sessionId);
+  }
+}
+```
+</CodeGroup>
+
+---
+
+## Common Patterns
+
+### Combining Validators
+
+<CodeGroup>
+```typescript Validate Complex Structures
+import { isObject, isString, isNumber } from 'wapi/utils/validators';
+
+interface User {
+  name: string;
+  age: number;
+}
+
+function isUser(value: unknown): value is User {
+  return (
+    isObject(value) &&
+    'name' in value &&
+    isString(value.name) &&
+    'age' in value &&
+    isNumber(value.age)
+  );
+}
+
+const data: unknown = { name: 'John', age: 30 };
+if (isUser(data)) {
+  console.log(`${data.name} is ${data.age} years old`);
+}
+```
+
+```typescript Array Element Validation
+import { isArray, isString } from 'wapi/utils/validators';
+
+function isStringArray(value: unknown): value is string[] {
+  return isArray(value) && value.every(isString);
+}
+
+command('tags', async (ctx) => {
+  const tags = ctx.data.tags;
+  
+  if (!isStringArray(tags)) {
+    await ctx.reply('Invalid tags format!');
+    return;
+  }
+  
+  await ctx.reply(`Tags: ${tags.join(', ')}`);
+});
+```
+</CodeGroup>
+
+### Input Sanitization
+
+<CodeGroup>
+```typescript Safe Type Conversion
+import { isString, isNumber } from 'wapi/utils/validators';
+
+function toNumber(value: unknown): number | null {
+  if (isNumber(value)) {
+    return value;
+  }
+  
+  if (isString(value)) {
+    const num = parseFloat(value);
+    return isNumber(num) ? num : null;
+  }
+  
+  return null;
+}
+
+command('calc', async (ctx) => {
+  const num = toNumber(ctx.args[0]);
+  
+  if (num === null) {
+    await ctx.reply('Please provide a valid number!');
+    return;
+  }
+  
+  await ctx.reply(`Result: ${num * 2}`);
+});
+```
+
+```typescript Flexible Input Handling
+import { isString, isArray } from 'wapi/utils/validators';
+
+function toArray(value: unknown): unknown[] {
+  if (isArray(value)) {
+    return value;
+  }
+  return [value];
+}
+
+function normalizeInput(input: unknown): string[] {
+  const arr = toArray(input);
+  return arr.filter(isString);
+}
+```
+</CodeGroup>
+
+### Middleware Validators
+
+<CodeGroup>
+```typescript Type-Safe Middleware
+import { isString } from 'wapi/utils/validators';
+import { defineMiddleware } from 'wapi';
+
+export const requireText = defineMiddleware(async (ctx, next) => {
+  if (!isString(ctx.message.text)) {
+    await ctx.reply('This command requires a text message!');
+    return;
+  }
+  
+  await next();
+});
+```
+
+```typescript Validate Command Arguments
+import { isArray, isString } from 'wapi/utils/validators';
+import { defineMiddleware } from 'wapi';
+
+export const requireArgs = (min: number) => {
+  return defineMiddleware(async (ctx, next) => {
+    if (!isArray(ctx.args) || ctx.args.length < min) {
+      await ctx.reply(`This command requires at least ${min} arguments!`);
+      return;
+    }
+    
+    await next();
+  });
+};
+```
+</CodeGroup>
+
+### Error Recovery
+
+<CodeGroup>
+```typescript Safe Property Access
+import { isObject, isString } from 'wapi/utils/validators';
+
+function getProperty(obj: unknown, key: string): unknown {
+  if (!isObject(obj)) {
+    return undefined;
+  }
+  
+  return key in obj ? (obj as Record<string, unknown>)[key] : undefined;
+}
+
+function getStringProperty(obj: unknown, key: string): string | undefined {
+  const value = getProperty(obj, key);
+  return isString(value) ? value : undefined;
+}
+```
+
+```typescript Graceful Degradation
+import { isError } from 'wapi/utils/validators';
+
+async function fetchWithFallback(url: string): Promise<unknown> {
+  try {
+    const response = await fetch(url);
+    return await response.json();
+  } catch (err) {
+    if (isError(err)) {
+      console.error('Fetch failed:', err.message);
+    }
+    return { error: 'Failed to fetch data' };
+  }
+}
+```
+</CodeGroup>
+
+---
+
+## Type Guard Benefits
+
+All validator functions act as TypeScript type guards, which means:
+
+<Tabs>
+  <Tab title="Type Narrowing">
+    ```typescript
+    function example(value: unknown) {
+      if (isString(value)) {
+        // TypeScript knows value is string here
+        value.toUpperCase(); // ✓ OK
+      }
+      
+      if (isNumber(value)) {
+        // TypeScript knows value is number here
+        value.toFixed(2); // ✓ OK
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Array Filtering">
+    ```typescript
+    const mixed: unknown[] = ['hello', 123, 'world', null, 456];
+    
+    // Filter with type narrowing
+    const strings: string[] = mixed.filter(isString);
+    const numbers: number[] = mixed.filter(isNumber);
+    
+    console.log(strings); // ['hello', 'world']
+    console.log(numbers); // [123, 456]
+    ```
+  </Tab>
+  
+  <Tab title="Safe Access">
+    ```typescript
+    function processData(data: unknown) {
+      if (isObject(data) && 'name' in data && isString(data.name)) {
+        // TypeScript knows data is an object with a string 'name' property
+        return data.name.toUpperCase();
+      }
+      
+      return 'UNKNOWN';
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## See Also
+
+- [JID Utilities](/api/utilities/jid) - JID-specific validation and parsing
+- [Middleware](/api/middleware) - Using validators in middleware
+- [Type Safety](/guides/typescript) - TypeScript best practices with WAPI

@@ -1,0 +1,775 @@
+---
+title: 'Context'
+description: 'Master the Context API for message handling and replies'
+icon: 'message'
+---
+
+## Overview
+
+The **Context** object is the heart of message handling in WAPI. It wraps every incoming WhatsApp message and provides rich metadata, parsed command information, and convenient reply methods. Every middleware and command handler receives a Context instance.
+
+<CardGroup cols={2}>
+  <Card title="Message Data" icon="envelope">
+    Access sender, chat, text, media, and more
+  </Card>
+  <Card title="Reply Methods" icon="reply">
+    Send text, images, videos, audio, and stickers
+  </Card>
+  <Card title="Message Actions" icon="pen-to-square">
+    Edit and delete messages programmatically
+  </Card>
+  <Card title="Command Parsing" icon="terminal">
+    Pre-parsed command name and arguments
+  </Card>
+</CardGroup>
+
+## Class Hierarchy
+
+The Context class extends the Message class:
+
+```typescript
+// From src/core/context/message.ts
+export class Message {
+  public message: WAMessage;
+  public chat: IChat;
+  public from: IFrom;
+  public type: keyof proto.IMessage;
+  public id: string;
+  public timestamp: number;
+  public hash: string;
+  public mimetype: string;
+  public text: string;
+  public size: number;
+  public mentions: string[];
+  public links: string[];
+  public quoted?: Message;
+}
+
+// From src/core/context/context.ts
+export class Context extends Message {
+  public bot: Bot;
+  public prefixUsed: string;
+  public commandName: string;
+  public args: string[];
+}
+```
+
+## Core Properties
+
+### Bot Reference
+
+```typescript
+public bot: Bot;
+```
+
+Reference to the Bot instance that created this context:
+
+```typescript
+bot.command('ping', async (ctx) => {
+  await ctx.reply(`Pong! ${ctx.bot.ping}ms`);
+});
+```
+
+### Command Properties
+
+From `src/core/context/context.ts` lines 9-11:
+
+```typescript
+public prefixUsed = "";
+public commandName = "";
+public args: string[] = [];
+```
+
+**Examples:**
+
+| Message | prefixUsed | commandName | args |
+|---------|-----------|-------------|------|
+| `!hello` | `!` | `hello` | `[]` |
+| `/greet Alice` | `/` | `greet` | `['Alice']` |
+| `!add 10 20` | `!` | `add` | `['10', '20']` |
+| `regular message` | `""` | `""` | `[]` |
+
+### Message Metadata
+
+From `src/core/context/message.ts` lines 21-27:
+
+```typescript
+public type: keyof proto.IMessage = "conversation";
+public id = "";
+public timestamp = 0;
+public hash = "";
+public mimetype = "";
+public text = "";
+public size = 0;
+```
+
+**Usage:**
+
+```typescript
+bot.use(async (ctx, next) => {
+  console.log('Message ID:', ctx.id);
+  console.log('Type:', ctx.type);
+  console.log('Timestamp:', new Date(ctx.timestamp * 1000));
+  console.log('Text:', ctx.text);
+  console.log('Size:', ctx.size);
+  await next();
+});
+```
+
+### Chat Information
+
+From `src/types/context.ts` lines 22-29:
+
+```typescript
+export interface IChat {
+  jid: string;
+  pn?: string;
+  type: ChatType; // "private" | "group" | "unknown"
+  addressing: "pn" | "lid" | "unknown";
+  name: string;
+}
+
+public chat: IChat;
+```
+
+**Examples:**
+
+```typescript
+bot.use(async (ctx, next) => {
+  if (ctx.chat.type === 'group') {
+    console.log('Group message from:', ctx.chat.name);
+  } else if (ctx.chat.type === 'private') {
+    console.log('Private message');
+  }
+  await next();
+});
+```
+
+### Sender Information
+
+From `src/types/context.ts` lines 30-34:
+
+```typescript
+export interface IFrom {
+  jid: string;
+  pn: string;
+  name: string;
+}
+
+public from: IFrom;
+```
+
+**Usage:**
+
+```typescript
+bot.command('whoami', async (ctx) => {
+  await ctx.reply([
+    `*Your Information:*`,
+    `Name: ${ctx.from.name}`,
+    `JID: ${ctx.from.jid}`,
+    `Phone: ${ctx.from.pn}`,
+  ].join('\n'));
+});
+```
+
+### Links and Mentions
+
+From `src/core/context/message.ts` lines 28-29:
+
+```typescript
+public mentions: string[] = [];
+public links: string[] = [];
+```
+
+Automatically parsed from message text (lines 37-40):
+
+```typescript
+if (this.text) {
+  this.mentions.push(...bot.parseMentions(this.text, this.chat.addressing === "lid" ? "lid" : "s.whatsapp.net"));
+  this.links.push(...bot.parseLinks(this.text));
+}
+```
+
+**Example:**
+
+```typescript
+bot.command('links', async (ctx) => {
+  if (ctx.links.length === 0) {
+    await ctx.reply('No links found in your message.');
+    return;
+  }
+  
+  const linkList = ctx.links.map((link, i) => `${i + 1}. ${link}`).join('\n');
+  await ctx.reply(`*Links found:*\n${linkList}`);
+});
+
+bot.command('mentions', async (ctx) => {
+  if (ctx.mentions.length === 0) {
+    await ctx.reply('No mentions found.');
+    return;
+  }
+  
+  await ctx.reply(`Found ${ctx.mentions.length} mention(s)`);
+});
+```
+
+### Quoted Messages
+
+From `src/core/context/message.ts` line 30:
+
+```typescript
+public quoted?: Message;
+```
+
+When a user replies to a message, `quoted` contains the original message:
+
+```typescript
+bot.command('quote', async (ctx) => {
+  if (!ctx.quoted) {
+    await ctx.reply('Please reply to a message with !quote');
+    return;
+  }
+  
+  await ctx.reply([
+    `*Quoted Message:*`,
+    `From: ${ctx.quoted.from.name}`,
+    `Text: ${ctx.quoted.text}`,
+    `Type: ${ctx.quoted.type}`,
+  ].join('\n'));
+});
+```
+
+## Reply Methods
+
+### reply()
+
+Send a text reply to the message.
+
+From `src/core/context/context.ts` lines 25-40:
+
+```typescript
+public async reply(text: string, options?: IReplyOptions): Promise<Context>
+```
+
+**Parameters:**
+- `text`: The text to send
+- `options`: Optional reply options
+  - `mentions`: Array of JIDs to mention
+  - `contextInfo`: Advanced context information
+
+**Returns:** New Context object for the sent message
+
+**Examples:**
+
+```typescript
+// Simple reply
+bot.command('hello', async (ctx) => {
+  await ctx.reply('Hello! 👋');
+});
+
+// Reply with mentions
+bot.command('mention', async (ctx) => {
+  await ctx.reply('Hello @1234567890!', {
+    mentions: ['1234567890@s.whatsapp.net']
+  });
+});
+
+// Multi-line reply
+bot.command('help', async (ctx) => {
+  await ctx.reply([
+    '*Available Commands:*',
+    '',
+    '!hello - Say hello',
+    '!ping - Check latency',
+    '!help - Show this message',
+  ].join('\n'));
+});
+
+// Chain replies
+bot.command('story', async (ctx) => {
+  await ctx.reply('Once upon a time...');
+  await new Promise(r => setTimeout(r, 2000));
+  await ctx.reply('...there was a WhatsApp bot.');
+  await new Promise(r => setTimeout(r, 2000));
+  await ctx.reply('The end! 📖');
+});
+```
+
+### replyWithImage()
+
+Send an image reply.
+
+From `src/core/context/context.ts` lines 41-69:
+
+```typescript
+public async replyWithImage(
+  image: string | Buffer, 
+  options?: IReplyWithImageOptions
+): Promise<Context>
+```
+
+**Parameters:**
+- `image`: Image URL (string) or Buffer
+- `options`: Optional options
+  - `caption`: Image caption
+  - `mimetype`: MIME type (default: `image/jpeg`)
+  - `viewOnce`: View-once image
+  - `mentions`: Array of JIDs to mention
+
+**Examples:**
+
+```typescript
+// Image from URL
+bot.command('cat', async (ctx) => {
+  await ctx.replyWithImage('https://cataas.com/cat', {
+    caption: 'Here\'s a random cat! 🐱'
+  });
+});
+
+// Image from Buffer
+import fs from 'fs';
+
+bot.command('logo', async (ctx) => {
+  const image = fs.readFileSync('./logo.jpg');
+  await ctx.replyWithImage(image, {
+    caption: 'Our logo'
+  });
+});
+
+// Profile picture
+bot.command('avatar', async (ctx) => {
+  const url = await ctx.bot.profilePictureUrl(ctx.from.jid);
+  await ctx.replyWithImage(url, {
+    caption: 'Your profile picture'
+  });
+});
+
+// View-once image
+bot.command('secret', async (ctx) => {
+  await ctx.replyWithImage('https://example.com/secret.jpg', {
+    viewOnce: true,
+    caption: 'This image will disappear after viewing'
+  });
+});
+```
+
+### replyWithVideo()
+
+Send a video reply.
+
+From `src/core/context/context.ts` lines 70-98:
+
+```typescript
+public async replyWithVideo(
+  video: string | Buffer,
+  options?: IReplyWithVideoOptions
+): Promise<Context>
+```
+
+**Parameters:**
+- `video`: Video URL (string) or Buffer
+- `options`: Optional options
+  - `caption`: Video caption
+  - `mimetype`: MIME type (default: `video/mp4`)
+  - `viewOnce`: View-once video
+  - `gifPlayback`: Play as GIF
+  - `mentions`: Array of JIDs to mention
+
+**Examples:**
+
+```typescript
+// Video from URL
+bot.command('video', async (ctx) => {
+  await ctx.replyWithVideo('https://example.com/video.mp4', {
+    caption: 'Check out this video!'
+  });
+});
+
+// GIF playback
+bot.command('gif', async (ctx) => {
+  await ctx.replyWithVideo('https://example.com/animation.mp4', {
+    gifPlayback: true
+  });
+});
+
+// Video from Buffer
+import fs from 'fs';
+
+bot.command('intro', async (ctx) => {
+  const video = fs.readFileSync('./intro.mp4');
+  await ctx.replyWithVideo(video, {
+    caption: 'Introduction video'
+  });
+});
+```
+
+### replyWithAudio()
+
+Send an audio reply.
+
+From `src/core/context/context.ts` lines 99-127:
+
+```typescript
+public async replyWithAudio(
+  audio: string | Buffer,
+  options?: IReplyWithAudioOptions
+): Promise<Context>
+```
+
+**Parameters:**
+- `audio`: Audio URL (string) or Buffer
+- `options`: Optional options
+  - `mimetype`: MIME type (default: `audio/mpeg`)
+  - `viewOnce`: View-once audio
+  - `mentions`: Array of JIDs to mention
+
+**Examples:**
+
+```typescript
+// Audio from URL
+bot.command('audio', async (ctx) => {
+  await ctx.replyWithAudio('https://example.com/sound.mp3');
+});
+
+// Voice message
+bot.command('voice', async (ctx) => {
+  const audio = fs.readFileSync('./voice-message.ogg');
+  await ctx.replyWithAudio(audio, {
+    mimetype: 'audio/ogg; codecs=opus'
+  });
+});
+```
+
+### replyWithSticker()
+
+Send a sticker reply.
+
+From `src/core/context/context.ts` lines 128-147:
+
+```typescript
+public async replyWithSticker(
+  sticker: Buffer,
+  options?: IReplyOptions
+): Promise<Context>
+```
+
+**Parameters:**
+- `sticker`: Sticker as Buffer (WebP format)
+- `options`: Optional reply options
+
+**Example:**
+
+```typescript
+import sharp from 'sharp';
+
+bot.command('sticker', async (ctx) => {
+  if (!ctx.quoted?.hash) {
+    await ctx.reply('Reply to an image with !sticker');
+    return;
+  }
+  
+  // Download quoted image
+  const buffer = await ctx.quoted.download();
+  
+  // Convert to WebP sticker
+  const sticker = await sharp(buffer)
+    .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .webp()
+    .toBuffer();
+  
+  await ctx.replyWithSticker(sticker);
+});
+```
+
+## Message Actions
+
+### del()
+
+Delete the message.
+
+From `src/core/context/context.ts` lines 148-155:
+
+```typescript
+public async del(): Promise<void>
+```
+
+**Examples:**
+
+```typescript
+// Auto-delete command messages
+bot.command('secret', async (ctx) => {
+  await ctx.reply('This is a secret command');
+  await ctx.del(); // Delete the command message
+});
+
+// Delete after delay
+bot.command('temp', async (ctx) => {
+  const msg = await ctx.reply('This message will self-destruct in 5 seconds...');
+  await new Promise(r => setTimeout(r, 5000));
+  await msg.del();
+});
+
+// Filter bad words
+bot.use(async (ctx, next) => {
+  const badWords = ['badword1', 'badword2'];
+  if (badWords.some(word => ctx.text.toLowerCase().includes(word))) {
+    await ctx.del();
+    await ctx.reply('Message deleted: inappropriate content');
+    return;
+  }
+  await next();
+});
+```
+
+### edit()
+
+Edit a message sent by the bot.
+
+From `src/core/context/context.ts` lines 156-173:
+
+```typescript
+public async edit(text: string): Promise<Context>
+```
+
+**Important:** Can only edit messages sent by the bot (`fromMe: true`)
+
+**Examples:**
+
+```typescript
+// Countdown
+bot.command('countdown', async (ctx) => {
+  const msg = await ctx.reply('5');
+  for (let i = 4; i >= 0; i--) {
+    await new Promise(r => setTimeout(r, 1000));
+    await msg.edit(i.toString());
+  }
+  await msg.edit('Time\'s up! 🎉');
+});
+
+// Progress indicator
+bot.command('process', async (ctx) => {
+  const msg = await ctx.reply('Processing... 0%');
+  
+  for (let i = 10; i <= 100; i += 10) {
+    await new Promise(r => setTimeout(r, 500));
+    await msg.edit(`Processing... ${i}%`);
+  }
+  
+  await msg.edit('Complete! ✅');
+});
+
+// Live update
+bot.command('time', async (ctx) => {
+  const msg = await ctx.reply(`Time: ${new Date().toLocaleTimeString()}`);
+  
+  const interval = setInterval(async () => {
+    await msg.edit(`Time: ${new Date().toLocaleTimeString()}`);
+  }, 1000);
+  
+  setTimeout(() => clearInterval(interval), 10000);
+});
+```
+
+### download()
+
+Download media from the message.
+
+From `src/core/context/context.ts` lines 174-176:
+
+```typescript
+public async download(): Promise<Buffer>
+```
+
+**Examples:**
+
+```typescript
+// Download and re-send image
+bot.command('mirror', async (ctx) => {
+  if (!ctx.quoted || ctx.quoted.type !== 'imageMessage') {
+    await ctx.reply('Reply to an image with !mirror');
+    return;
+  }
+  
+  const buffer = await ctx.quoted.download();
+  await ctx.replyWithImage(buffer, {
+    caption: 'Mirrored image'
+  });
+});
+
+// Save media
+import fs from 'fs';
+
+bot.command('save', async (ctx) => {
+  if (!ctx.quoted?.hash) {
+    await ctx.reply('Reply to a media message with !save');
+    return;
+  }
+  
+  const buffer = await ctx.quoted.download();
+  const filename = `${ctx.quoted.hash}.${ctx.quoted.mimetype.split('/')[1]}`;
+  fs.writeFileSync(`./downloads/${filename}`, buffer);
+  
+  await ctx.reply(`Saved as ${filename}`);
+});
+
+// Image analysis
+bot.command('analyze', async (ctx) => {
+  if (ctx.type !== 'imageMessage' && ctx.quoted?.type !== 'imageMessage') {
+    await ctx.reply('Send or reply to an image');
+    return;
+  }
+  
+  const buffer = ctx.type === 'imageMessage' 
+    ? await ctx.download() 
+    : await ctx.quoted!.download();
+  
+  // Analyze with sharp
+  const sharp = require('sharp');
+  const metadata = await sharp(buffer).metadata();
+  
+  await ctx.reply([
+    '*Image Analysis:*',
+    `Format: ${metadata.format}`,
+    `Size: ${metadata.width}x${metadata.height}`,
+    `Channels: ${metadata.channels}`,
+  ].join('\n'));
+});
+```
+
+## Raw Message Access
+
+From `src/core/context/message.ts` line 9:
+
+```typescript
+public message: WAMessage;
+```
+
+Access the raw Baileys message object:
+
+```typescript
+bot.use(async (ctx, next) => {
+  console.log('Raw message:', ctx.message);
+  console.log('Message key:', ctx.message.key);
+  console.log('From me:', ctx.message.key.fromMe);
+  await next();
+});
+```
+
+## Advanced Patterns
+
+### Conversation State
+
+```typescript
+const conversations = new Map<string, any>();
+
+bot.command('start', async (ctx) => {
+  conversations.set(ctx.from.jid, { step: 'name' });
+  await ctx.reply('What\'s your name?');
+});
+
+bot.use(async (ctx, next) => {
+  const state = conversations.get(ctx.from.jid);
+  if (!state) {
+    await next();
+    return;
+  }
+  
+  if (state.step === 'name') {
+    state.name = ctx.text;
+    state.step = 'age';
+    await ctx.reply(`Nice to meet you, ${state.name}! How old are you?`);
+  } else if (state.step === 'age') {
+    state.age = parseInt(ctx.text);
+    await ctx.reply(`You are ${state.name}, ${state.age} years old.`);
+    conversations.delete(ctx.from.jid);
+  }
+});
+```
+
+### Menu System
+
+```typescript
+bot.command('menu', async (ctx) => {
+  await ctx.reply([
+    '*Main Menu*',
+    '',
+    '1️⃣ Profile',
+    '2️⃣ Settings',
+    '3️⃣ Help',
+    '',
+    'Reply with a number to select',
+  ].join('\n'));
+});
+
+bot.use(async (ctx, next) => {
+  if (ctx.text === '1') {
+    await ctx.reply('*Profile Menu*\n...');
+  } else if (ctx.text === '2') {
+    await ctx.reply('*Settings Menu*\n...');
+  } else if (ctx.text === '3') {
+    await ctx.reply('*Help Menu*\n...');
+  } else {
+    await next();
+  }
+});
+```
+
+### Reaction Handler
+
+```typescript
+bot.use(async (ctx, next) => {
+  // Check if message is a reaction
+  if (ctx.type === 'reactionMessage') {
+    console.log(`Reaction: ${ctx.text}`);
+    // Handle reaction
+  }
+  await next();
+});
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always check message type before downloading">
+    ```typescript
+    if (ctx.type === 'imageMessage') {
+      const buffer = await ctx.download();
+      // Process image
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Use optional chaining for quoted messages">
+    ```typescript
+    const quotedText = ctx.quoted?.text || 'No text';
+    ```
+  </Accordion>
+
+  <Accordion title="Store sent messages for editing/deleting">
+    ```typescript
+    const msg = await ctx.reply('Original');
+    // Later...
+    await msg.edit('Updated');
+    ```
+  </Accordion>
+
+  <Accordion title="Check chat type before group operations">
+    ```typescript
+    if (ctx.chat.type !== 'group') {
+      await ctx.reply('This command only works in groups');
+      return;
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Commands" icon="terminal" href="/concepts/commands">
+    Build command-based interactions
+  </Card>
+  <Card title="Middleware" icon="layer-group" href="/concepts/middleware">
+    Compose message handlers
+  </Card>
+</CardGroup>

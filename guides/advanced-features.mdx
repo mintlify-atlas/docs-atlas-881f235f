@@ -1,0 +1,752 @@
+---
+title: "Advanced Features"
+description: "Explore advanced utilities, caching, error handling, and bot patterns in WAPI"
+---
+
+## Overview
+
+WAPI provides powerful utilities and patterns for building sophisticated WhatsApp bots. This guide covers advanced features that help you create robust, production-ready applications.
+
+<CardGroup cols={2}>
+  <Card title="MessageBuilder" icon="hammer">
+    Create formatted messages with utilities
+  </Card>
+  <Card title="Caching System" icon="database">
+    Leverage built-in contact and group caching
+  </Card>
+  <Card title="JID Utilities" icon="fingerprint">
+    Work with WhatsApp identifiers efficiently
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation">
+    Implement robust error handling patterns
+  </Card>
+</CardGroup>
+
+## MessageBuilder Utility
+
+The `MessageBuilder` class (from `utils/message-builder.ts`) provides a fluent API for creating beautifully formatted WhatsApp messages:
+
+### Basic Usage
+
+```typescript
+import { MessageBuilder } from "wapi-core/utils";
+
+bot.command("welcome", async (ctx) => {
+  const message = new MessageBuilder()
+    .addTitle("Welcome to WAPI", 50)
+    .addBlankLine()
+    .addDescription("Build amazing WhatsApp bots with ease!")
+    .addBlankLine()
+    .addList([
+      "Easy to use API",
+      "TypeScript support",
+      "Automatic caching",
+      "Rich formatting"
+    ])
+    .addBlankLine()
+    .addFooter("Powered by WAPI", 50)
+    .build();
+  
+  await ctx.reply(message);
+});
+```
+
+<Note>
+The `MessageBuilder` uses WhatsApp's text formatting syntax (asterisks for bold, underscores for italic) to create visually appealing messages.
+</Note>
+
+### MessageBuilder Methods
+
+<Tabs>
+  <Tab title="Titles & Subtitles">
+    ```typescript
+    const msg = new MessageBuilder()
+      .addTitle("Main Title", 50)      // Centered with decorative brackets
+      .addSubTitle("Subtitle", 25)     // Smaller centered subtitle
+      .build();
+    
+    // Output:
+    // *『* Main Title *』*
+    // *「* Subtitle *」*
+    ```
+  </Tab>
+  <Tab title="Content">
+    ```typescript
+    const msg = new MessageBuilder()
+      .addDescription("Important info")  // With bullet point
+      .addLine("Regular text")          // Plain line
+      .addBlankLine()                    // Empty line for spacing
+      .build();
+    
+    // Output:
+    // *»* Important info
+    // Regular text
+    // 
+    ```
+  </Tab>
+  <Tab title="Lists">
+    ```typescript
+    const items = ["Item 1", "Item 2", "Item 3"];
+    
+    const msg = new MessageBuilder()
+      .addList(items)              // Default bullet (•)
+      .addList(items, "→")         // Custom prefix
+      .build();
+    
+    // Output:
+    // *•* Item 1
+    // *•* Item 2
+    // *•* Item 3
+    // *→* Item 1
+    // *→* Item 2
+    // *→* Item 3
+    ```
+  </Tab>
+  <Tab title="Footer">
+    ```typescript
+    const msg = new MessageBuilder()
+      .addFooter("© 2024 MyBot", 50)  // Centered italic footer
+      .build();
+    
+    // Output:
+    // _© 2024 MyBot_
+    ```
+  </Tab>
+</Tabs>
+
+### Practical MessageBuilder Examples
+
+<Steps>
+  <Step title="Help Menu">
+    Create a formatted help menu:
+    
+    ```typescript
+    bot.command("help", async (ctx) => {
+      const help = new MessageBuilder()
+        .addTitle("Bot Commands", 50)
+        .addBlankLine()
+        .addSubTitle("General", 30)
+        .addList([
+          "!help - Show this menu",
+          "!ping - Check bot status",
+          "!info - Bot information"
+        ], "→")
+        .addBlankLine()
+        .addSubTitle("Media", 30)
+        .addList([
+          "!image <url> - Send image",
+          "!video <url> - Send video",
+          "!sticker - Create sticker"
+        ], "→")
+        .addBlankLine()
+        .addFooter("Use !command for details", 50)
+        .build();
+      
+      await ctx.reply(help);
+    });
+    ```
+  </Step>
+  
+  <Step title="Status Report">
+    Build a status report with metrics:
+    
+    ```typescript
+    bot.command("status", async (ctx) => {
+      const uptime = process.uptime();
+      const hours = Math.floor(uptime / 3600);
+      const minutes = Math.floor((uptime % 3600) / 60);
+      
+      const status = new MessageBuilder()
+        .addTitle("Bot Status", 50)
+        .addBlankLine()
+        .addDescription("System Information")
+        .addList([
+          `Uptime: ${hours}h ${minutes}m`,
+          `Memory: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`,
+          `Ping: ${ctx.bot.ping.toFixed(0)}ms`,
+          `Groups: ${ctx.bot.groups.size}`
+        ])
+        .addBlankLine()
+        .addFooter(`Updated: ${new Date().toLocaleString()}`, 50)
+        .build();
+      
+      await ctx.reply(status);
+    });
+    ```
+  </Step>
+  
+  <Step title="Announcement Template">
+    Create announcement messages:
+    
+    ```typescript
+    function createAnnouncement(title: string, content: string, author: string): string {
+      return new MessageBuilder()
+        .addTitle("ANNOUNCEMENT", 50)
+        .addBlankLine()
+        .addSubTitle(title, 40)
+        .addBlankLine()
+        .addLine(content)
+        .addBlankLine()
+        .addFooter(`By ${author}`, 50)
+        .build();
+    }
+    
+    bot.command("announce", async (ctx) => {
+      const title = ctx.args[0];
+      const content = ctx.args.slice(1).join(" ");
+      
+      if (!title || !content) {
+        await ctx.reply("Usage: !announce <title> <message>");
+        return;
+      }
+      
+      const announcement = createAnnouncement(title, content, ctx.from.name);
+      await ctx.reply(announcement);
+    });
+    ```
+  </Step>
+</Steps>
+
+## Caching System
+
+WAPI includes built-in caching for contacts and groups to improve performance and reduce network requests.
+
+### Contact Cache
+
+The contact cache (from `cache/contacts.ts`) stores user information:
+
+```typescript
+import { contacts } from "wapi-core/cache";
+
+bot.use(async (ctx, next) => {
+  // Access contact cache (Map<string, IContact>)
+  if (contacts.has(ctx.from.jid)) {
+    const contact = contacts.get(ctx.from.jid);
+    console.log(`Known contact: ${contact.name}`);
+    console.log(`JID: ${contact.jid}`);
+    console.log(`Phone: ${contact.pn}`);
+  }
+  
+  await next();
+});
+```
+
+<Tip>
+Contacts are automatically added to the cache when messages are received (see `bot.ts:175-177`). Updates are handled via Baileys' contact events (see `bot.ts:205-220`).
+</Tip>
+
+### Contact Cache Features
+
+<AccordionGroup>
+  <Accordion title="Automatic Population">
+    Contacts are automatically added when:
+    - Messages are received from them
+    - They participate in group chats
+    - Contact updates are received from WhatsApp
+    
+    ```typescript
+    // Happens automatically in WAPI
+    bot.use(async (ctx, next) => {
+      // ctx.from.jid is automatically cached here
+      console.log(`Cache size: ${contacts.size}`);
+      await next();
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Name Updates">
+    Contact names are automatically updated:
+    
+    ```typescript
+    // WAPI automatically updates names via contacts.update event
+    // You can access the latest name anytime:
+    
+    bot.command("whois", async (ctx) => {
+      const jid = ctx.mentions[0] || ctx.from.jid;
+      
+      if (contacts.has(jid)) {
+        const contact = contacts.get(jid);
+        await ctx.reply(`${contact.name} (${contact.pn})`);
+      } else {
+        await ctx.reply("Contact not in cache.");
+      }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Contact Search">
+    Search contacts by name or phone:
+    
+    ```typescript
+    function findContact(query: string) {
+      const lowerQuery = query.toLowerCase();
+      
+      return Array.from(contacts.values()).find(contact =>
+        contact.name.toLowerCase().includes(lowerQuery) ||
+        contact.pn.includes(query) ||
+        contact.jid.includes(query)
+      );
+    }
+    
+    bot.command("find", async (ctx) => {
+      const query = ctx.args.join(" ");
+      if (!query) {
+        await ctx.reply("Provide a search query.");
+        return;
+      }
+      
+      const contact = findContact(query);
+      if (contact) {
+        await ctx.reply(`Found: ${contact.name} (${contact.pn})`);
+      } else {
+        await ctx.reply("Contact not found.");
+      }
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Group Cache
+
+The group cache (from `cache/groups.ts`) stores group metadata:
+
+```typescript
+import { groups } from "wapi-core/cache";
+
+bot.command("listgroups", async (ctx) => {
+  if (groups.size === 0) {
+    await ctx.reply("No groups in cache.");
+    return;
+  }
+  
+  const groupList = Array.from(groups.values())
+    .map((g, i) => {
+      const memberCount = g.participants.length;
+      return `${i + 1}. ${g.subject} (${memberCount} members)`;
+    })
+    .join("\n");
+  
+  const message = new MessageBuilder()
+    .addTitle("Bot Groups", 50)
+    .addBlankLine()
+    .addLine(groupList)
+    .addBlankLine()
+    .addFooter(`Total: ${groups.size} groups`, 50)
+    .build();
+  
+  await ctx.reply(message);
+});
+```
+
+<Note>
+Group cache is automatically managed by WAPI. When groups are updated, the cache is refreshed (see `bot.ts:222-237`). When messages arrive from new groups, metadata is fetched and cached (see `bot.ts:167-173`).
+</Note>
+
+## JID Utilities
+
+WAPI provides utility functions for working with WhatsApp JIDs (Jabber IDs):
+
+### JID Decoding and Normalization
+
+```typescript
+import { decode, normalize, isGroup, isPn, isLid } from "wapi-core/utils";
+
+bot.command("jid", async (ctx) => {
+  const jid = ctx.from.jid;
+  
+  // Decode JID into components
+  const decoded = decode(jid);
+  console.log(decoded.jid);    // "1234567890"
+  console.log(decoded.server); // "lid" or "s.whatsapp.net" or "g.us"
+  
+  // Normalize JID format
+  const normalized = normalize(jid);
+  console.log(normalized); // "1234567890@lid"
+  
+  // Check JID type
+  const info = [
+    `JID: ${normalized}`,
+    `Type: ${isGroup(jid) ? "Group" : isPn(jid) ? "Phone" : isLid(jid) ? "LID" : "Unknown"}`,
+    `User: ${decoded.jid}`,
+    `Server: ${decoded.server}`
+  ].join("\n");
+  
+  await ctx.reply(info);
+});
+```
+
+<Tabs>
+  <Tab title="decode()">
+    Extract components from a JID:
+    
+    ```typescript
+    import { decode } from "wapi-core/utils";
+    
+    const jid = "1234567890@s.whatsapp.net";
+    const decoded = decode(jid);
+    
+    console.log(decoded.jid);    // "1234567890"
+    console.log(decoded.server); // "s.whatsapp.net"
+    
+    // Works with any JID format
+    const groupJid = "123456789@g.us";
+    const groupDecoded = decode(groupJid);
+    console.log(groupDecoded.server); // "g.us"
+    ```
+  </Tab>
+  <Tab title="normalize()">
+    Convert JID to standard format:
+    
+    ```typescript
+    import { normalize } from "wapi-core/utils";
+    
+    // Remove port numbers and normalize
+    const jid1 = "1234567890:1@s.whatsapp.net";
+    const normalized1 = normalize(jid1);
+    console.log(normalized1); // "1234567890@s.whatsapp.net"
+    
+    // Works with any format
+    const jid2 = "1234567890@lid";
+    const normalized2 = normalize(jid2);
+    console.log(normalized2); // "1234567890@lid"
+    ```
+  </Tab>
+  <Tab title="Type Checkers">
+    Check JID types:
+    
+    ```typescript
+    import { isGroup, isPn, isLid } from "wapi-core/utils";
+    
+    const groupJid = "123456789@g.us";
+    const phoneJid = "1234567890@s.whatsapp.net";
+    const lidJid = "1234567890@lid";
+    
+    console.log(isGroup(groupJid)); // true
+    console.log(isGroup(phoneJid)); // false
+    
+    console.log(isPn(phoneJid));    // true
+    console.log(isPn(lidJid));      // false
+    
+    console.log(isLid(lidJid));     // true
+    console.log(isLid(phoneJid));   // false
+    
+    // Use in conditions
+    if (isGroup(ctx.chat.jid)) {
+      console.log("Message from group");
+    } else if (isPn(ctx.from.pn)) {
+      console.log("Message from phone number");
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Profile Pictures
+
+Get profile pictures for users and groups:
+
+```typescript
+bot.command("avatar", async (ctx) => {
+  const jid = ctx.mentions[0] || ctx.from.jid;
+  
+  try {
+    // Get profile picture URL
+    const url = await ctx.bot.profilePictureUrl(jid);
+    
+    await ctx.replyWithImage(url, {
+      caption: `Profile picture for @${jid.split("@")[0]}`
+    });
+  } catch (error) {
+    await ctx.reply("Could not fetch profile picture.");
+  }
+});
+```
+
+<Note>
+The `profilePictureUrl()` method (from `bot.ts:344-354`) returns a fallback image if no profile picture is set. It automatically handles errors gracefully.
+</Note>
+
+### Profile Picture Examples
+
+```typescript
+// Get group profile picture
+bot.command("groupavatar", async (ctx) => {
+  if (ctx.chat.type !== "group") {
+    await ctx.reply("This command only works in groups.");
+    return;
+  }
+  
+  const url = await ctx.bot.profilePictureUrl(ctx.chat.jid);
+  await ctx.replyWithImage(url, {
+    caption: `${ctx.chat.name} profile picture`
+  });
+});
+
+// Get your own profile picture
+bot.command("myavatar", async (ctx) => {
+  const url = await ctx.bot.profilePictureUrl(ctx.bot.account.jid);
+  await ctx.replyWithImage(url, {
+    caption: "Your profile picture"
+  });
+});
+```
+
+## Error Handling Patterns
+
+Implement robust error handling in your bot:
+
+### Bot-Level Error Handler
+
+```typescript
+bot.on("error", (error) => {
+  console.error("Bot error:", error);
+  
+  // Log to file or external service
+  // Send notification to admin
+  // Implement retry logic if needed
+});
+```
+
+### Command-Level Error Handling
+
+```typescript
+bot.command("risky", async (ctx) => {
+  try {
+    // Potentially failing operation
+    const result = await someRiskyOperation();
+    await ctx.reply(`Success: ${result}`);
+  } catch (error) {
+    console.error("Command failed:", error);
+    await ctx.reply("An error occurred. Please try again later.");
+  }
+});
+```
+
+### Middleware Error Wrapper
+
+```typescript
+function errorHandler(handler: MiddlewareFn): MiddlewareFn {
+  return async (ctx, next) => {
+    try {
+      await handler(ctx, next);
+    } catch (error) {
+      console.error(`Error in middleware:`, error);
+      await ctx.reply("An error occurred while processing your request.");
+    }
+  };
+}
+
+// Use the wrapper
+bot.command("wrapped", errorHandler(async (ctx) => {
+  // This code is protected by error handler
+  throw new Error("Something went wrong!");
+}));
+```
+
+### Graceful Degradation
+
+```typescript
+bot.command("fetch", async (ctx) => {
+  try {
+    const data = await fetchExternalAPI();
+    await ctx.reply(formatData(data));
+  } catch (error) {
+    // Fall back to cached data
+    const cached = getCachedData();
+    
+    if (cached) {
+      await ctx.reply(`${formatData(cached)}\n\n_Note: Using cached data_`);
+    } else {
+      await ctx.reply("Service temporarily unavailable. Please try again later.");
+    }
+  }
+});
+```
+
+## Advanced Bot Patterns
+
+<Steps>
+  <Step title="Command Cooldown">
+    Implement per-user command cooldowns:
+    
+    ```typescript
+    const cooldowns = new Map<string, number>();
+    const COOLDOWN_MS = 10000; // 10 seconds
+    
+    function cooldown(handler: MiddlewareFn): MiddlewareFn {
+      return async (ctx, next) => {
+        const key = `${ctx.from.jid}:${ctx.commandName}`;
+        const now = Date.now();
+        const lastUsed = cooldowns.get(key) || 0;
+        
+        if (now - lastUsed < COOLDOWN_MS) {
+          const remaining = Math.ceil((COOLDOWN_MS - (now - lastUsed)) / 1000);
+          await ctx.reply(`Please wait ${remaining} seconds before using this command again.`);
+          return;
+        }
+        
+        cooldowns.set(key, now);
+        await handler(ctx, next);
+      };
+    }
+    
+    bot.command("limited", cooldown(async (ctx) => {
+      await ctx.reply("Command executed!");
+    }));
+    ```
+  </Step>
+  
+  <Step title="State Management">
+    Track conversation state per user:
+    
+    ```typescript
+    interface UserState {
+      step: number;
+      data: Record<string, any>;
+    }
+    
+    const userStates = new Map<string, UserState>();
+    
+    bot.command("register", async (ctx) => {
+      userStates.set(ctx.from.jid, { step: 1, data: {} });
+      await ctx.reply("What's your name?");
+    });
+    
+    bot.use(async (ctx, next) => {
+      const state = userStates.get(ctx.from.jid);
+      
+      if (state) {
+        switch (state.step) {
+          case 1:
+            state.data.name = ctx.text;
+            state.step = 2;
+            await ctx.reply("What's your age?");
+            break;
+          case 2:
+            state.data.age = parseInt(ctx.text);
+            await ctx.reply(`Thanks ${state.data.name}, ${state.data.age} years old!`);
+            userStates.delete(ctx.from.jid);
+            break;
+        }
+        return;
+      }
+      
+      await next();
+    });
+    ```
+  </Step>
+  
+  <Step title="Permission System">
+    Implement role-based permissions:
+    
+    ```typescript
+    const ADMIN_JIDS = new Set([
+      "1234567890@s.whatsapp.net",
+      "9876543210@lid"
+    ]);
+    
+    function requireAdmin(handler: MiddlewareFn): MiddlewareFn {
+      return async (ctx, next) => {
+        if (!ADMIN_JIDS.has(ctx.from.jid) && !ADMIN_JIDS.has(ctx.from.pn)) {
+          await ctx.reply("This command requires admin permissions.");
+          return;
+        }
+        await handler(ctx, next);
+      };
+    }
+    
+    bot.command("admin", requireAdmin(async (ctx) => {
+      await ctx.reply("Admin command executed!");
+    }));
+    ```
+  </Step>
+  
+  <Step title="Command Aliases">
+    Create command aliases:
+    
+    ```typescript
+    function alias(name: string, aliases: string[]) {
+      return (handler: MiddlewareFn) => {
+        bot.command(name, handler);
+        aliases.forEach(alias => {
+          bot.command(alias, handler);
+        });
+      };
+    }
+    
+    // Use aliases
+    alias("help", ["h", "?", "commands"])(async (ctx) => {
+      await ctx.reply("Help menu...");
+    });
+    ```
+  </Step>
+</Steps>
+
+## Performance Optimization
+
+<AccordionGroup>
+  <Accordion title="Use cache when possible">
+    ```typescript
+    import { groups, contacts } from "wapi-core/cache";
+    
+    // Good: Use cache
+    const group = groups.get(ctx.chat.jid);
+    
+    // Avoid: Unnecessary network request
+    const group = await ctx.bot.groupMetadata(ctx.chat.jid);
+    ```
+  </Accordion>
+  
+  <Accordion title="Batch operations">
+    ```typescript
+    // Send multiple messages efficiently
+    bot.command("batch", async (ctx) => {
+      const messages = ["Message 1", "Message 2", "Message 3"];
+      
+      // Good: Use Promise.all for independent operations
+      await Promise.all(
+        messages.map(msg => ctx.reply(msg))
+      );
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Debounce expensive operations">
+    ```typescript
+    const debounceMap = new Map<string, NodeJS.Timeout>();
+    
+    function debounce(key: string, fn: () => void, delay: number) {
+      const existing = debounceMap.get(key);
+      if (existing) clearTimeout(existing);
+      
+      const timeout = setTimeout(fn, delay);
+      debounceMap.set(key, timeout);
+    }
+    
+    bot.use(async (ctx, next) => {
+      debounce(`user:${ctx.from.jid}`, async () => {
+        // Expensive operation
+        console.log("Processing...");
+      }, 5000);
+      
+      await next();
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Handling Messages" icon="message" href="/guides/handling-messages">
+    Learn about message types and parsing
+  </Card>
+  <Card title="Media Messages" icon="image" href="/guides/media-messages">
+    Send and receive media files
+  </Card>
+  <Card title="Groups" icon="users" href="/guides/groups">
+    Work with group chats
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/bot">
+    Full API documentation
+  </Card>
+</CardGroup>

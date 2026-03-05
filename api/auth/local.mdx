@@ -1,0 +1,459 @@
+---
+title: "LocalAuth"
+description: "Store WhatsApp sessions securely on the local filesystem"
+---
+
+## Overview
+
+The `LocalAuth` class provides persistent authentication storage using the local filesystem. It automatically encrypts session data using AES-256-GCM encryption with your bot's UUID as the encryption key, ensuring sensitive credentials are protected at rest.
+
+### Key Features
+
+- **Encrypted Storage**: All session data is encrypted using AES-256-GCM
+- **File-based Persistence**: Sessions stored as encrypted files in a dedicated directory
+- **Automatic Hashing**: Keys are MD5-hashed for consistent filenames
+- **In-memory Cache**: Reduces disk I/O with intelligent caching
+- **Zero Configuration**: Works out of the box with minimal setup
+
+<Note>
+  LocalAuth is the default authentication strategy and is ideal for development, testing, and single-server deployments.
+</Note>
+
+---
+
+## Constructor
+
+### `new LocalAuth(uuid, directory)`
+
+Creates a new LocalAuth instance for managing bot authentication on the filesystem.
+
+<ParamField path="uuid" type="UUID" required>
+  A valid UUID (v4) that uniquely identifies this bot instance. This UUID is used as the encryption key and as a subdirectory name.
+</ParamField>
+
+<ParamField path="directory" type="string" required>
+  The base directory where encrypted session files will be stored. Can be relative or absolute. A subdirectory named after the UUID will be created inside this directory.
+</ParamField>
+
+#### Example
+
+<CodeGroup>
+
+```typescript Basic Usage
+import { Bot, LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+
+const uuid = randomUUID();
+const auth = new LocalAuth(uuid, "./sessions");
+
+const bot = new Bot({ auth });
+```
+
+```typescript Absolute Path
+import { Bot, LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+
+const uuid = randomUUID();
+const sessionsDir = path.join(process.cwd(), "data", "sessions");
+const auth = new LocalAuth(uuid, sessionsDir);
+
+const bot = new Bot({ auth });
+```
+
+```typescript Multiple Bots
+import { Bot, LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+
+// Create multiple bots with separate sessions
+const bot1 = new Bot({
+  auth: new LocalAuth(randomUUID(), "./sessions")
+});
+
+const bot2 = new Bot({
+  auth: new LocalAuth(randomUUID(), "./sessions")
+});
+```
+
+</CodeGroup>
+
+#### Throws
+
+- `Error`: If the provided UUID is not a valid UUID v4 format
+
+---
+
+## Properties
+
+### `uuid`
+
+<ResponseField name="uuid" type="UUID">
+  The UUID associated with this authentication instance. This is the same UUID provided to the constructor.
+</ResponseField>
+
+```typescript
+const auth = new LocalAuth(uuid, "./sessions");
+console.log(auth.uuid); // "550e8400-e29b-41d4-a716-446655440000"
+```
+
+---
+
+## Methods
+
+### `init()`
+
+Initializes the authentication system by loading or creating credentials and setting up the key store.
+
+<CodeGroup>
+
+```typescript Signature
+init(): Promise<IBotAuthInit>
+```
+
+```typescript Interface
+interface IBotAuthInit {
+  creds: AuthenticationCreds;
+  keys: SignalKeyStore;
+}
+```
+
+</CodeGroup>
+
+#### Behavior
+
+1. **Directory Creation**: Creates the session directory if it doesn't exist
+2. **Credential Loading**: Attempts to load existing credentials from disk
+3. **New Session**: If no credentials exist, generates new authentication credentials
+4. **Key Store Setup**: Initializes the Signal protocol key store for WhatsApp encryption
+
+#### Returns
+
+<Expandable title="IBotAuthInit">
+  <ResponseField name="creds" type="AuthenticationCreds">
+    WhatsApp authentication credentials containing account information, encryption keys, and session state. This is managed internally by the Baileys library.
+  </ResponseField>
+
+  <ResponseField name="keys" type="SignalKeyStore">
+    The Signal protocol key store used for end-to-end encryption. Provides `get()` and `set()` methods for managing cryptographic keys.
+  </ResponseField>
+</Expandable>
+
+#### Example
+
+```typescript
+import { LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+
+const auth = new LocalAuth(randomUUID(), "./sessions");
+
+// Initialize authentication
+const { creds, keys } = await auth.init();
+
+console.log("Credentials loaded:", !!creds);
+console.log("Keys initialized:", !!keys);
+```
+
+<Note>
+  This method is called automatically by the `Bot` class during initialization. You rarely need to call it directly.
+</Note>
+
+---
+
+### `save()`
+
+Persists the current authentication credentials to disk.
+
+```typescript
+save(): Promise<void>
+```
+
+#### Behavior
+
+1. **Validation**: Ensures credentials have been loaded via `init()`
+2. **Serialization**: Converts credentials to JSON format
+3. **Encryption**: Encrypts the data using AES-256-GCM
+4. **Persistence**: Writes the encrypted data to disk
+5. **Cache Update**: Updates the in-memory cache
+
+#### Throws
+
+- `Error`: If credentials haven't been initialized ("Credentials not loaded.")
+
+#### Example
+
+```typescript
+import { LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+
+const auth = new LocalAuth(randomUUID(), "./sessions");
+
+// Initialize and save
+await auth.init();
+await auth.save();
+
+console.log("Session saved successfully");
+```
+
+<Warning>
+  The `Bot` class automatically saves credentials when authentication state changes. Manual calls to `save()` are typically unnecessary.
+</Warning>
+
+---
+
+### `remove()`
+
+Deletes all authentication data from disk and clears the cache.
+
+```typescript
+remove(): Promise<void>
+```
+
+#### Behavior
+
+1. **Directory Removal**: Recursively deletes the entire session directory
+2. **Cache Clearing**: Clears the in-memory cache
+3. **Force Delete**: Uses `force: true` to ignore missing files
+
+#### Example
+
+<CodeGroup>
+
+```typescript Basic Removal
+import { LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+
+const uuid = randomUUID();
+const auth = new LocalAuth(uuid, "./sessions");
+
+// Remove session data
+await auth.remove();
+console.log("Session removed");
+```
+
+```typescript With Bot Instance
+import { Bot, LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+
+const uuid = randomUUID();
+const auth = new LocalAuth(uuid, "./sessions");
+const bot = new Bot({ auth });
+
+// Logout and remove session
+bot.on("open", async (account) => {
+  console.log("Logged in as:", account.name);
+  
+  // Later: logout and remove
+  await bot.logout();
+  await auth.remove();
+  
+  console.log("Logged out and session removed");
+});
+```
+
+</CodeGroup>
+
+<Warning>
+  This operation is irreversible. After calling `remove()`, the bot will need to re-authenticate (scan QR code or enter OTP) on next startup.
+</Warning>
+
+---
+
+## Storage Details
+
+### Directory Structure
+
+```
+./sessions/
+└── 550e8400-e29b-41d4-a716-446655440000/
+    ├── 5f4dcc3b5aa765d61d8327deb882cf99.enc
+    ├── 098f6bcd4621d373cade4e832627b4f6.enc
+    └── ... (other encrypted files)
+```
+
+### File Naming
+
+- Each key (e.g., "creds", "pre-key-1", "session-2") is MD5-hashed
+- Files are stored with `.enc` extension
+- Example: `creds` → `5f4dcc3b5aa765d61d8327deb882cf99.enc`
+
+### Encryption
+
+<Tabs>
+  <Tab title="Algorithm">
+    - **Cipher**: AES-256-GCM (Galois/Counter Mode)
+    - **Key**: Derived from the bot's UUID
+    - **Security**: Authenticated encryption with associated data (AEAD)
+  </Tab>
+  <Tab title="Data Format">
+    1. Original data is JSON-stringified
+    2. Buffers are converted to base64 strings
+    3. Result is encrypted with AES-256-GCM
+    4. Encrypted bytes are written to disk
+  </Tab>
+  <Tab title="Decryption">
+    1. Read encrypted file from disk
+    2. Decrypt using AES-256-GCM with UUID key
+    3. Parse JSON and restore Buffer objects
+    4. Return deserialized data
+  </Tab>
+</Tabs>
+
+---
+
+## Complete Example
+
+<CodeGroup>
+
+```typescript Basic Bot
+import { Bot, LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+
+const uuid = randomUUID();
+const auth = new LocalAuth(uuid, "./sessions");
+
+const bot = new Bot({ auth });
+
+bot.on("qr", (qr) => {
+  console.log("Scan this QR code:", qr);
+});
+
+bot.on("open", (account) => {
+  console.log("Connected as:", account.name);
+});
+
+bot.command("hello", (ctx) => {
+  ctx.reply("Hello from LocalAuth!");
+});
+
+bot.launch();
+```
+
+```typescript Persistent UUID
+import { Bot, LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+
+const uuidFile = path.join(process.cwd(), ".bot-uuid");
+
+// Load or create UUID
+let uuid: string;
+if (fs.existsSync(uuidFile)) {
+  uuid = fs.readFileSync(uuidFile, "utf8").trim();
+} else {
+  uuid = randomUUID();
+  fs.writeFileSync(uuidFile, uuid);
+}
+
+const auth = new LocalAuth(uuid, "./sessions");
+const bot = new Bot({ auth });
+
+bot.on("open", (account) => {
+  console.log("Connected with UUID:", uuid);
+});
+
+bot.launch();
+```
+
+```typescript Session Management
+import { Bot, LocalAuth } from "wapi";
+import { randomUUID } from "node:crypto";
+
+const uuid = randomUUID();
+const auth = new LocalAuth(uuid, "./sessions");
+const bot = new Bot({ auth });
+
+bot.command("logout", async (ctx) => {
+  await ctx.reply("Logging out and removing session...");
+  
+  // Logout from WhatsApp
+  await bot.logout();
+  
+  // Remove session data
+  await auth.remove();
+  
+  console.log("Session removed. Restart to re-authenticate.");
+  process.exit(0);
+});
+
+bot.command("session", (ctx) => {
+  ctx.reply(`Session UUID: ${auth.uuid}`);
+});
+
+bot.launch();
+```
+
+</CodeGroup>
+
+---
+
+## Advantages
+
+<Tabs>
+  <Tab title="Simplicity">
+    - No external dependencies
+    - Works out of the box
+    - Perfect for development
+    - Easy to backup (just copy directory)
+  </Tab>
+  <Tab title="Security">
+    - AES-256-GCM encryption
+    - Keys derived from UUID
+    - No plaintext credentials on disk
+    - Resistant to unauthorized access
+  </Tab>
+  <Tab title="Performance">
+    - In-memory caching
+    - Efficient file I/O
+    - Minimal overhead
+    - Fast read/write operations
+  </Tab>
+</Tabs>
+
+---
+
+## Limitations
+
+<Warning>
+  LocalAuth is not suitable for distributed systems or multi-server deployments. For those scenarios, use [RedisAuth](/api/auth/redis) or [MongoAuth](/api/auth/mongo).
+</Warning>
+
+- **Single Server Only**: Cannot share sessions across multiple servers
+- **No Redundancy**: If directory is deleted, session is lost
+- **Scaling**: Each server instance needs its own session directory
+- **Backups**: Manual backup process required
+
+---
+
+## When to Use
+
+<Tabs>
+  <Tab title="Use LocalAuth">
+    ✅ Development and testing  
+    ✅ Single-server production  
+    ✅ Simple deployments  
+    ✅ Personal bots  
+    ✅ Low-scale applications
+  </Tab>
+  <Tab title="Use RedisAuth">
+    🔄 Multi-server deployments  
+    🔄 High availability required  
+    🔄 Horizontal scaling  
+    🔄 Fast session switching
+  </Tab>
+  <Tab title="Use MongoAuth">
+    🗄️ Centralized session management  
+    🗄️ Long-term persistence  
+    🗄️ Audit trails needed  
+    🗄️ Existing MongoDB infrastructure
+  </Tab>
+</Tabs>
+
+---
+
+## See Also
+
+- [RedisAuth](/api/auth/redis) - Redis-based authentication
+- [MongoAuth](/api/auth/mongo) - MongoDB-based authentication
+- [Bot Class](/api/bot) - Main bot class
+- [Authentication Guide](/concepts/authentication) - Authentication strategies overview

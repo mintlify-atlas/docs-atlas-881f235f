@@ -1,0 +1,595 @@
+---
+title: 'Commands'
+description: 'Building command-based interactions with your WhatsApp bot'
+icon: 'terminal'
+---
+
+## Overview
+
+WAPI provides a built-in **command system** that automatically parses messages with command prefixes and routes them to specific handlers. Commands are parsed from the message text using a configurable prefix pattern.
+
+<CardGroup cols={2}>
+  <Card title="Auto-Parsing" icon="wand-magic-sparkles">
+    Commands are automatically detected and parsed from messages
+  </Card>
+  <Card title="Flexible Prefixes" icon="at">
+    Customizable prefix characters (default: `!/`)
+  </Card>
+  <Card title="Arguments Support" icon="list">
+    Automatic argument splitting and parsing
+  </Card>
+  <Card title="Case-Insensitive" icon="text">
+    Command names are normalized to lowercase
+  </Card>
+</CardGroup>
+
+## Command Prefix
+
+From `src/core/bot.ts` line 22:
+
+```typescript
+public prefix = "!/";
+```
+
+By default, WAPI recognizes two command prefixes:
+- `!` (exclamation mark)
+- `/` (forward slash)
+
+You can customize this:
+
+```typescript
+import { Bot, LocalAuth } from 'wapi';
+import { randomUUID } from 'crypto';
+
+const bot = new Bot(randomUUID(), new LocalAuth(randomUUID(), './sessions'), {
+  jid: '', pn: '', name: ''
+});
+
+// Change prefix to only accept '.'
+bot.prefix = '.';
+
+// Multiple characters: accept both '!' and '$'
+bot.prefix = '!$';
+
+// Accept '.', '!', and '/'
+bot.prefix = '.!/';
+```
+
+## Registering Commands
+
+From `src/core/bot.ts` lines 41-46:
+
+```typescript
+public command(name: string, ...middlewares: MiddlewareFn[]): void {
+  if (!name) {
+    throw new Error("The command name must be at least 1 character long.");
+  }
+  this.commands.set(name, middlewares);
+}
+```
+
+### Basic Command
+
+```typescript
+bot.command('hello', async (ctx) => {
+  await ctx.reply('Hello! 👋');
+});
+
+// User sends: "!hello" or "/hello"
+// Bot replies: "Hello! 👋"
+```
+
+### Command with Arguments
+
+```typescript
+bot.command('greet', async (ctx) => {
+  const name = ctx.args[0] || 'stranger';
+  await ctx.reply(`Hello, ${name}!`);
+});
+
+// User sends: "!greet Alice"
+// Bot replies: "Hello, Alice!"
+
+// User sends: "!greet"
+// Bot replies: "Hello, stranger!"
+```
+
+### Multiple Middleware Handlers
+
+```typescript
+bot.command('admin',
+  // First middleware: authorization
+  async (ctx, next) => {
+    const adminJids = ['admin1@lid', 'admin2@lid'];
+    if (adminJids.includes(ctx.from.jid)) {
+      await next();
+    } else {
+      await ctx.reply('Admin only!');
+    }
+  },
+  // Second middleware: actual handler
+  async (ctx) => {
+    await ctx.reply('Admin command executed!');
+  }
+);
+```
+
+## Command Parsing
+
+From `src/core/context/context.ts` lines 9-23:
+
+```typescript
+export class Context extends Message {
+  public bot: Bot;
+  public prefixUsed = "";
+  public commandName = "";
+  public args: string[] = [];
+  
+  constructor(bot: Bot, message: WAMessage) {
+    super(bot, message);
+    this.bot = bot;
+    if (this.text) {
+      const regexp = new RegExp(`^\\s*([${this.bot.prefix}])\\s*([a-zA-Z0-9_$>?-]+)(?:\\s+(.+))?`, "i");
+      const match = (this.text.match(regexp) ?? []).filter(Boolean).map((v) => (v.trim()));
+      if (match.length) {
+        this.prefixUsed = match[1] ?? "";
+        this.commandName = (match[2] ?? "").toLowerCase();
+        this.args = (match[3] ?? "").split(/\\s+/).filter(Boolean).map((v) => (v.trim()));
+      }
+    }
+  }
+}
+```
+
+### Regex Pattern Breakdown
+
+```javascript
+^\s*([!/ ])\s*([a-zA-Z0-9_$>?-]+)(?:\s+(.+))?
+│   │      │   │                    │
+│   │      │   │                    └─ Capture group 3: arguments (optional)
+│   │      │   └─ Capture group 2: command name (letters, numbers, _$>?-)
+│   │      └─ Optional whitespace
+│   └─ Capture group 1: prefix character
+└─ Start of string + optional whitespace
+```
+
+### Examples
+
+| Message | prefixUsed | commandName | args |
+|---------|-----------|-------------|------|
+| `!hello` | `!` | `hello` | `[]` |
+| `/ping` | `/` | `ping` | `[]` |
+| `!greet Alice` | `!` | `greet` | `['Alice']` |
+| `!echo Hello World` | `!` | `echo` | `['Hello', 'World']` |
+| `/calculate 10 + 20` | `/` | `calculate` | `['10', '+', '20']` |
+| `  ! test   args  ` | `!` | `test` | `['args']` |
+| `hello` (no prefix) | `""` | `""` | `[]` |
+
+<Note>
+  Command names are automatically converted to **lowercase**, so `!Hello`, `!HELLO`, and `!hello` all map to the same command.
+</Note>
+
+## Context Properties
+
+When processing commands, you have access to:
+
+### `ctx.prefixUsed`
+
+The actual prefix character used:
+
+```typescript
+bot.command('test', async (ctx) => {
+  await ctx.reply(`You used the '${ctx.prefixUsed}' prefix`);
+});
+
+// User sends: "!test"
+// Bot replies: "You used the '!' prefix"
+```
+
+### `ctx.commandName`
+
+The parsed command name (lowercase):
+
+```typescript
+bot.use(async (ctx, next) => {
+  if (ctx.commandName) {
+    console.log(`Command detected: ${ctx.commandName}`);
+  }
+  await next();
+});
+```
+
+### `ctx.args`
+
+Array of arguments split by whitespace:
+
+```typescript
+bot.command('add', async (ctx) => {
+  const [a, b] = ctx.args.map(Number);
+  if (isNaN(a) || isNaN(b)) {
+    await ctx.reply('Usage: !add <number> <number>');
+    return;
+  }
+  await ctx.reply(`Result: ${a + b}`);
+});
+
+// User sends: "!add 10 20"
+// Bot replies: "Result: 30"
+```
+
+## Command Patterns
+
+### Echo Command
+
+```typescript
+bot.command('echo', async (ctx) => {
+  const message = ctx.args.join(' ');
+  if (!message) {
+    await ctx.reply('Usage: !echo <message>');
+    return;
+  }
+  await ctx.reply(message);
+});
+```
+
+### Help Command
+
+```typescript
+const commands = {
+  help: 'Show this help message',
+  ping: 'Check if bot is alive',
+  echo: 'Echo back your message',
+  greet: 'Greet someone',
+};
+
+bot.command('help', async (ctx) => {
+  const helpText = Object.entries(commands)
+    .map(([cmd, desc]) => `*${ctx.prefixUsed}${cmd}* - ${desc}`)
+    .join('\n');
+  
+  await ctx.reply(`*Available Commands:*\n\n${helpText}`);
+});
+```
+
+### Calculator Command
+
+```typescript
+bot.command('calc', async (ctx) => {
+  const expression = ctx.args.join(' ');
+  if (!expression) {
+    await ctx.reply('Usage: !calc <expression>\nExample: !calc 2 + 2');
+    return;
+  }
+  
+  try {
+    // Simple evaluation (be careful with eval in production!)
+    const result = eval(expression);
+    await ctx.reply(`Result: ${result}`);
+  } catch (error) {
+    await ctx.reply('Invalid expression');
+  }
+});
+```
+
+### User Info Command
+
+```typescript
+bot.command('userinfo', async (ctx) => {
+  const info = [
+    `*User Information*`,
+    ``,
+    `Name: ${ctx.from.name}`,
+    `JID: ${ctx.from.jid}`,
+    `Phone: ${ctx.from.pn}`,
+    `Chat Type: ${ctx.chat.type}`,
+  ].join('\n');
+  
+  await ctx.reply(info);
+});
+```
+
+### Random Command
+
+```typescript
+bot.command('random', async (ctx) => {
+  const [min, max] = ctx.args.map(Number);
+  
+  if (isNaN(min) || isNaN(max)) {
+    await ctx.reply('Usage: !random <min> <max>\nExample: !random 1 100');
+    return;
+  }
+  
+  const random = Math.floor(Math.random() * (max - min + 1)) + min;
+  await ctx.reply(`Random number: ${random}`);
+});
+```
+
+### Countdown Command
+
+```typescript
+bot.command('countdown', async (ctx) => {
+  const seconds = parseInt(ctx.args[0]);
+  
+  if (isNaN(seconds) || seconds < 1 || seconds > 10) {
+    await ctx.reply('Usage: !countdown <1-10>');
+    return;
+  }
+  
+  const message = await ctx.reply(`Countdown: ${seconds}`);
+  
+  for (let i = seconds - 1; i >= 0; i--) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await message.edit(`Countdown: ${i}`);
+  }
+  
+  await message.edit('Time\'s up! 🎉');
+});
+```
+
+## Advanced Patterns
+
+### Subcommands
+
+```typescript
+bot.command('user', async (ctx) => {
+  const subcommand = ctx.args[0]?.toLowerCase();
+  
+  switch (subcommand) {
+    case 'info':
+      await ctx.reply(`Name: ${ctx.from.name}`);
+      break;
+    
+    case 'avatar':
+      const url = await ctx.bot.profilePictureUrl(ctx.from.jid);
+      await ctx.replyWithImage(url, { caption: 'Your avatar' });
+      break;
+    
+    default:
+      await ctx.reply('Usage: !user <info|avatar>');
+  }
+});
+```
+
+### Quoted Arguments
+
+Handle arguments with spaces using quotes:
+
+```typescript
+function parseQuotedArgs(args: string[]): string[] {
+  const text = args.join(' ');
+  const matches = text.match(/"([^"]+)"|'([^']+)'|(\S+)/g);
+  return matches?.map(arg => arg.replace(/["']/g, '')) || [];
+}
+
+bot.command('say', async (ctx) => {
+  const parsed = parseQuotedArgs(ctx.args);
+  const [times, message] = parsed;
+  
+  const count = parseInt(times);
+  if (isNaN(count) || !message) {
+    await ctx.reply('Usage: !say <times> "message"');
+    return;
+  }
+  
+  await ctx.reply(message.repeat(count));
+});
+
+// User sends: !say 3 "Hello "
+// Bot replies: "Hello Hello Hello "
+```
+
+### Command Aliases
+
+```typescript
+const pingHandler = async (ctx) => {
+  await ctx.reply(`Pong! 🏓\nPing: ${ctx.bot.ping.toFixed(2)}ms`);
+};
+
+bot.command('ping', pingHandler);
+bot.command('p', pingHandler);     // Alias
+bot.command('latency', pingHandler); // Another alias
+```
+
+### Command Cooldowns
+
+```typescript
+const cooldowns = new Map<string, number>();
+
+function cooldown(seconds: number) {
+  return async (ctx, next) => {
+    const key = `${ctx.from.jid}:${ctx.commandName}`;
+    const now = Date.now();
+    const lastUsed = cooldowns.get(key) || 0;
+    const remaining = seconds * 1000 - (now - lastUsed);
+    
+    if (remaining > 0) {
+      await ctx.reply(`Please wait ${Math.ceil(remaining / 1000)}s before using this command again.`);
+      return;
+    }
+    
+    cooldowns.set(key, now);
+    await next();
+  };
+}
+
+// Usage
+bot.command('expensive', 
+  cooldown(10), // 10-second cooldown
+  async (ctx) => {
+    await ctx.reply('Expensive operation completed!');
+  }
+);
+```
+
+## Command Documentation
+
+Create a self-documenting command system:
+
+```typescript
+interface CommandInfo {
+  description: string;
+  usage: string;
+  examples?: string[];
+  handler: MiddlewareFn;
+}
+
+const commands = new Map<string, CommandInfo>();
+
+function registerCommand(name: string, info: CommandInfo) {
+  commands.set(name, info);
+  bot.command(name, info.handler);
+}
+
+// Register commands
+registerCommand('greet', {
+  description: 'Greet someone',
+  usage: '!greet [name]',
+  examples: ['!greet Alice', '!greet'],
+  handler: async (ctx) => {
+    const name = ctx.args[0] || 'stranger';
+    await ctx.reply(`Hello, ${name}!`);
+  }
+});
+
+registerCommand('add', {
+  description: 'Add two numbers',
+  usage: '!add <number1> <number2>',
+  examples: ['!add 10 20', '!add 5 -3'],
+  handler: async (ctx) => {
+    const [a, b] = ctx.args.map(Number);
+    if (isNaN(a) || isNaN(b)) {
+      const info = commands.get('add')!;
+      await ctx.reply(`Usage: ${info.usage}`);
+      return;
+    }
+    await ctx.reply(`Result: ${a + b}`);
+  }
+});
+
+// Auto-generated help command
+bot.command('help', async (ctx) => {
+  const cmdName = ctx.args[0]?.toLowerCase();
+  
+  if (cmdName && commands.has(cmdName)) {
+    // Show detailed help for specific command
+    const info = commands.get(cmdName)!;
+    let text = `*${cmdName}*\n\n${info.description}\n\n*Usage:* ${info.usage}`;
+    if (info.examples?.length) {
+      text += `\n\n*Examples:*\n${info.examples.join('\n')}`;
+    }
+    await ctx.reply(text);
+  } else {
+    // Show all commands
+    const list = Array.from(commands.entries())
+      .map(([name, info]) => `*${name}* - ${info.description}`)
+      .join('\n');
+    await ctx.reply(`*Available Commands:*\n\n${list}\n\nUse !help <command> for details`);
+  }
+});
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Validate arguments">
+    Always check if required arguments are provided:
+    
+    ```typescript
+    bot.command('kick', async (ctx) => {
+      if (ctx.args.length === 0) {
+        await ctx.reply('Usage: !kick @user');
+        return;
+      }
+      // Proceed with command
+    });
+    ```
+  </Step>
+
+  <Step title="Provide helpful error messages">
+    ```typescript
+    bot.command('ban', async (ctx) => {
+      if (!ctx.mentions.length) {
+        await ctx.reply('❌ Please mention a user to ban.\nUsage: !ban @user');
+        return;
+      }
+      // Ban logic
+    });
+    ```
+  </Step>
+
+  <Step title="Use middleware for common checks">
+    ```typescript
+    const requireArgs = (min: number) => async (ctx, next) => {
+      if (ctx.args.length < min) {
+        await ctx.reply(`This command requires at least ${min} argument(s)`);
+        return;
+      }
+      await next();
+    };
+
+    bot.command('multiply', requireArgs(2), async (ctx) => {
+      const [a, b] = ctx.args.map(Number);
+      await ctx.reply(`Result: ${a * b}`);
+    });
+    ```
+  </Step>
+
+  <Step title="Handle edge cases">
+    ```typescript
+    bot.command('divide', async (ctx) => {
+      const [a, b] = ctx.args.map(Number);
+      
+      if (isNaN(a) || isNaN(b)) {
+        await ctx.reply('Please provide valid numbers');
+        return;
+      }
+      
+      if (b === 0) {
+        await ctx.reply('Cannot divide by zero!');
+        return;
+      }
+      
+      await ctx.reply(`Result: ${a / b}`);
+    });
+    ```
+  </Step>
+</Steps>
+
+## Debugging Commands
+
+```typescript
+// Log all commands
+bot.use(async (ctx, next) => {
+  if (ctx.commandName) {
+    console.log(`[COMMAND] ${ctx.commandName}`);
+    console.log(`[PREFIX] ${ctx.prefixUsed}`);
+    console.log(`[ARGS] ${JSON.stringify(ctx.args)}`);
+    console.log(`[USER] ${ctx.from.name} (${ctx.from.jid})`);
+  }
+  await next();
+});
+
+// Test command for debugging
+bot.command('debug', async (ctx) => {
+  const debug = {
+    command: ctx.commandName,
+    prefix: ctx.prefixUsed,
+    args: ctx.args,
+    text: ctx.text,
+    from: ctx.from,
+    chat: ctx.chat,
+  };
+  await ctx.reply(`\`\`\`json\n${JSON.stringify(debug, null, 2)}\n\`\`\``);
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Context" icon="message" href="/concepts/context">
+    Learn about the Context API and reply methods
+  </Card>
+  <Card title="Middleware" icon="layer-group" href="/concepts/middleware">
+    Build composable message handlers
+  </Card>
+</CardGroup>

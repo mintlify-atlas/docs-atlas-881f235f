@@ -1,0 +1,684 @@
+---
+title: 'Bot'
+description: 'Core Bot class for managing WhatsApp connections and message handling'
+icon: 'robot'
+---
+
+The `Bot` class is the main entry point for creating and managing WhatsApp bot instances. It extends Node.js EventEmitter and handles authentication, connection management, message routing, and middleware execution.
+
+## Import
+
+```typescript
+import { Bot } from 'wapi';
+```
+
+## Constructor
+
+Creates a new Bot instance with authentication and account configuration.
+
+```typescript
+new Bot(uuid: UUID, auth: IBotAuth, account: IBotAccount, logger?: Logger)
+```
+
+<ParamField path="uuid" type="UUID" required>
+  Unique identifier for the bot instance (from node:crypto)
+</ParamField>
+
+<ParamField path="auth" type="IBotAuth" required>
+  Authentication handler implementing the IBotAuth interface:
+  
+  <Expandable title="IBotAuth Interface">
+    <ResponseField name="init" type="() => Promise<IBotAuthInit>">
+      Initializes and returns authentication credentials and keys
+    </ResponseField>
+    
+    <ResponseField name="save" type="() => Promise<void>">
+      Saves current authentication state
+    </ResponseField>
+    
+    <ResponseField name="remove" type="() => Promise<void>">
+      Removes stored authentication data
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="account" type="IBotAccount" required>
+  Account information object:
+  
+  <Expandable title="IBotAccount Interface">
+    <ResponseField name="jid" type="string">
+      WhatsApp JID (LID format)
+    </ResponseField>
+    
+    <ResponseField name="pn" type="string">
+      Phone number
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Account display name
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="logger" type="Logger">
+  Optional custom logger instance. If not provided, a default logger is created.
+</ParamField>
+
+### Example
+
+```typescript
+import { Bot } from 'wapi';
+import { randomUUID } from 'node:crypto';
+
+const bot = new Bot(
+  randomUUID(),
+  authHandler,
+  { jid: '', pn: '', name: '' }
+);
+```
+
+## Properties
+
+<ResponseField name="uuid" type="UUID">
+  Unique identifier for this bot instance
+</ResponseField>
+
+<ResponseField name="ws" type="BotWASocket | null">
+  The Baileys WebSocket connection instance. Null when disconnected.
+</ResponseField>
+
+<ResponseField name="auth" type="IBotAuth">
+  Authentication handler for managing credentials
+</ResponseField>
+
+<ResponseField name="account" type="IBotAccount">
+  Current account information (updated after successful login)
+</ResponseField>
+
+<ResponseField name="status" type="BotStatus">
+  Current connection status: `"close"`, `"open"`, or `"reconnecting"`
+</ResponseField>
+
+<ResponseField name="logger" type="Logger">
+  Logger instance for debugging and monitoring
+</ResponseField>
+
+<ResponseField name="ping" type="number">
+  Last message send latency in milliseconds (updated after each sendMessage call)
+</ResponseField>
+
+<ResponseField name="prefix" type="string" default="!/">
+  Command prefix characters. Default is `"!/"` allowing both `!` and `/` as prefixes.
+</ResponseField>
+
+## Methods
+
+### use()
+
+Registers global middleware functions that run for all incoming messages.
+
+```typescript
+bot.use(...middlewares: MiddlewareFn[]): void
+```
+
+<ParamField path="middlewares" type="MiddlewareFn[]" required>
+  One or more middleware functions with signature:
+  ```typescript
+  (ctx: Context, next: () => Promise<void>) => Promise<void>
+  ```
+</ParamField>
+
+<CodeGroup>
+```typescript Example: Single Middleware
+bot.use(async (ctx, next) => {
+  console.log(`Received: ${ctx.text}`);
+  await next();
+});
+```
+
+```typescript Example: Multiple Middlewares
+bot.use(
+  async (ctx, next) => {
+    // Logger middleware
+    console.log(`From: ${ctx.from.name}`);
+    await next();
+  },
+  async (ctx, next) => {
+    // Rate limiter middleware
+    if (isRateLimited(ctx.from.jid)) return;
+    await next();
+  }
+);
+```
+</CodeGroup>
+
+### command()
+
+Registers command-specific middleware that only runs when a command is invoked.
+
+```typescript
+bot.command(name: string, ...middlewares: MiddlewareFn[]): void
+```
+
+<ParamField path="name" type="string" required>
+  Command name (without prefix). Must be at least 1 character long.
+</ParamField>
+
+<ParamField path="middlewares" type="MiddlewareFn[]" required>
+  Middleware functions to execute for this command
+</ParamField>
+
+<CodeGroup>
+```typescript Example: Simple Command
+bot.command('hello', async (ctx) => {
+  await ctx.reply('Hello! 👋');
+});
+```
+
+```typescript Example: Command with Arguments
+bot.command('echo', async (ctx) => {
+  const text = ctx.args.join(' ');
+  if (!text) {
+    await ctx.reply('Usage: !echo <message>');
+    return;
+  }
+  await ctx.reply(text);
+});
+```
+
+```typescript Example: Multiple Command Middlewares
+bot.command(
+  'admin',
+  async (ctx, next) => {
+    // Check if user is admin
+    if (!isAdmin(ctx.from.jid)) {
+      await ctx.reply('❌ Admin only!');
+      return;
+    }
+    await next();
+  },
+  async (ctx) => {
+    // Execute admin command
+    await ctx.reply('✅ Admin panel');
+  }
+);
+```
+</CodeGroup>
+
+<Note>
+  Command names are case-insensitive and automatically converted to lowercase.
+</Note>
+
+### login()
+
+Initiates the WhatsApp connection using QR code or OTP authentication.
+
+```typescript
+await bot.login(method: "qr" | "otp"): Promise<void>
+```
+
+<ParamField path="method" type="'qr' | 'otp'" required>
+  Authentication method:
+  - `"qr"`: Generates QR codes for scanning (emits `qr` event)
+  - `"otp"`: Sends one-time password to phone number (emits `otp` event)
+</ParamField>
+
+<CodeGroup>
+```typescript QR Code Login
+import qrcode from 'qrcode-terminal';
+
+bot.on('qr', (qr) => {
+  qrcode.generate(qr, { small: true });
+  console.log('Scan the QR code above');
+});
+
+bot.on('open', (account) => {
+  console.log(`Logged in as ${account.name}`);
+});
+
+await bot.login('qr');
+```
+
+```typescript OTP Login
+bot.on('otp', (code) => {
+  console.log(`Your OTP code: ${code}`);
+});
+
+bot.on('open', (account) => {
+  console.log(`Logged in as ${account.name}`);
+});
+
+await bot.login('otp');
+```
+</CodeGroup>
+
+<Warning>
+  For OTP login, the `account.pn` must be set with a valid phone number before calling `login()`.
+</Warning>
+
+### disconnect()
+
+Gracefully disconnects the bot from WhatsApp.
+
+```typescript
+await bot.disconnect(reason?: Error): Promise<void>
+```
+
+<ParamField path="reason" type="Error">
+  Optional error describing the disconnect reason. Defaults to "Intentional disconnection."
+</ParamField>
+
+```typescript
+// Graceful disconnect
+await bot.disconnect();
+
+// Disconnect with reason
+await bot.disconnect(new Error('Maintenance mode'));
+```
+
+### logout()
+
+Logs out from WhatsApp and clears authentication data.
+
+```typescript
+await bot.logout(reason?: Boom): Promise<void>
+```
+
+<ParamField path="reason" type="Boom">
+  Optional Boom error with logout reason
+</ParamField>
+
+```typescript
+import { Boom } from '@hapi/boom';
+
+await bot.logout(new Boom('User requested logout'));
+```
+
+<Warning>
+  After logout, you'll need to authenticate again using QR code or OTP.
+</Warning>
+
+### parseMentions()
+
+Extracts WhatsApp mentions from text.
+
+```typescript
+bot.parseMentions(text: string, server: JidServer): string[]
+```
+
+<ParamField path="text" type="string" required>
+  Text containing mentions in format `@1234567890`
+</ParamField>
+
+<ParamField path="server" type="JidServer" required>
+  JID server type: `"s.whatsapp.net"` (phone numbers) or `"lid"` (LID format)
+</ParamField>
+
+<ResponseField name="returns" type="string[]">
+  Array of formatted JIDs
+</ResponseField>
+
+```typescript
+const text = 'Hello @1234567890 and @9876543210';
+const mentions = bot.parseMentions(text, 's.whatsapp.net');
+// Returns: ['1234567890@s.whatsapp.net', '9876543210@s.whatsapp.net']
+```
+
+### parseLinks()
+
+Extracts URLs, emails, and phone numbers from text.
+
+```typescript
+bot.parseLinks(text: string): string[]
+```
+
+<ParamField path="text" type="string" required>
+  Text to parse for links
+</ParamField>
+
+<ResponseField name="returns" type="string[]">
+  Array of extracted links (URLs, emails, phone numbers)
+</ResponseField>
+
+```typescript
+const text = 'Visit https://example.com or email test@example.com';
+const links = bot.parseLinks(text);
+// Returns: ['https://example.com', 'mailto:test@example.com']
+```
+
+### sendMessage()
+
+Sends a message to a WhatsApp chat.
+
+```typescript
+await bot.sendMessage(
+  jid: string,
+  content: AnyMessageContent,
+  options?: IBotSendMessageOptions
+): Promise<Context | null>
+```
+
+<ParamField path="jid" type="string" required>
+  Recipient JID (chat ID)
+</ParamField>
+
+<ParamField path="content" type="AnyMessageContent" required>
+  Message content object from Baileys:
+  
+  <Expandable title="Common Content Types">
+    <ResponseField name="text" type="string">
+      Plain text message
+    </ResponseField>
+    
+    <ResponseField name="image" type="WAMediaUpload">
+      Image message with optional `caption`, `mimetype`
+    </ResponseField>
+    
+    <ResponseField name="video" type="WAMediaUpload">
+      Video message with optional `caption`, `gifPlayback`
+    </ResponseField>
+    
+    <ResponseField name="audio" type="WAMediaUpload">
+      Audio message with optional `ptt` (push-to-talk)
+    </ResponseField>
+    
+    <ResponseField name="sticker" type="WAMediaUpload">
+      Sticker message
+    </ResponseField>
+    
+    <ResponseField name="document" type="WAMediaUpload">
+      Document with `fileName`, `mimetype`
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="options" type="IBotSendMessageOptions">
+  Send options:
+  
+  <Expandable title="IBotSendMessageOptions">
+    <ResponseField name="quoted" type="WAMessage">
+      Message to quote/reply to
+    </ResponseField>
+    
+    <ResponseField name="addressing" type="'pn' | 'lid'">
+      Addressing mode for mentions
+    </ResponseField>
+    
+    <ResponseField name="ephemeralExpiration" type="number">
+      Ephemeral message expiration in seconds
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Context | null>">
+  Context object for the sent message, or null if sending failed
+</ResponseField>
+
+<CodeGroup>
+```typescript Text Message
+const ctx = await bot.sendMessage(
+  '1234567890@s.whatsapp.net',
+  { text: 'Hello World!' }
+);
+```
+
+```typescript Image with Caption
+const ctx = await bot.sendMessage(
+  'group@g.us',
+  {
+    image: { url: 'https://example.com/image.jpg' },
+    caption: 'Check this out!'
+  }
+);
+```
+
+```typescript Reply to Message
+const ctx = await bot.sendMessage(
+  chatJid,
+  { text: 'Replying to you' },
+  { quoted: originalMessage }
+);
+```
+
+```typescript With Mentions
+const ctx = await bot.sendMessage(
+  'group@g.us',
+  { text: 'Hello @1234567890!' },
+  { addressing: 'lid' }
+);
+```
+</CodeGroup>
+
+<Note>
+  The `ping` property is automatically updated with send latency after each call.
+</Note>
+
+### groupMetadata()
+
+Retrieves metadata for a group chat.
+
+```typescript
+await bot.groupMetadata(jid: string): Promise<GroupMetadata | null>
+```
+
+<ParamField path="jid" type="string" required>
+  Group JID (must end with `@g.us`)
+</ParamField>
+
+<ResponseField name="returns" type="Promise<GroupMetadata | null>">
+  Group metadata object containing:
+  - `id`: Group JID
+  - `subject`: Group name
+  - `owner`: Creator JID
+  - `creation`: Creation timestamp
+  - `desc`: Group description
+  - `participants`: Array of participant objects
+  - `announce`: Admin-only posting mode
+  - `restrict`: Restrict group info changes
+</ResponseField>
+
+```typescript
+const metadata = await bot.groupMetadata('123456789@g.us');
+if (metadata) {
+  console.log(`Group: ${metadata.subject}`);
+  console.log(`Members: ${metadata.participants.length}`);
+  console.log(`Created: ${new Date(metadata.creation * 1000)}`);
+}
+```
+
+<Note>
+  Results are cached automatically to reduce API calls.
+</Note>
+
+### profilePictureUrl()
+
+Gets the profile picture URL for a user or group.
+
+```typescript
+await bot.profilePictureUrl(jid: string): Promise<string>
+```
+
+<ParamField path="jid" type="string" required>
+  User or group JID
+</ParamField>
+
+<ResponseField name="returns" type="Promise<string>">
+  Profile picture URL. Returns a default placeholder if no picture is set or on error.
+</ResponseField>
+
+```typescript
+const avatarUrl = await bot.profilePictureUrl(ctx.from.jid);
+await ctx.replyWithImage(
+  avatarUrl,
+  { caption: 'Your profile picture' }
+);
+```
+
+## Events
+
+The Bot class emits the following events:
+
+### qr
+
+Emitted when a QR code is generated during login.
+
+```typescript
+bot.on('qr', (qr: string) => {
+  // Display QR code for scanning
+  console.log(qr);
+});
+```
+
+<ParamField path="qr" type="string">
+  QR code data string (can be rendered with qrcode libraries)
+</ParamField>
+
+### otp
+
+Emitted when an OTP code is generated.
+
+```typescript
+bot.on('otp', (code: string) => {
+  // Display OTP code to user
+  console.log(`Your code: ${code}`);
+});
+```
+
+<ParamField path="code" type="string">
+  6-digit OTP code
+</ParamField>
+
+### open
+
+Emitted when connection is successfully established.
+
+```typescript
+bot.on('open', (account: IBotAccount) => {
+  console.log(`Connected as ${account.name}`);
+  console.log(`JID: ${account.jid}`);
+  console.log(`Phone: ${account.pn}`);
+});
+```
+
+<ParamField path="account" type="IBotAccount">
+  Updated account information with JID, phone number, and name
+</ParamField>
+
+### close
+
+Emitted when connection is closed.
+
+```typescript
+bot.on('close', (reason: string) => {
+  console.log(`Disconnected: ${reason}`);
+});
+```
+
+<ParamField path="reason" type="string">
+  Human-readable disconnect reason (includes status code and error message)
+</ParamField>
+
+### error
+
+Emitted when an error occurs.
+
+```typescript
+bot.on('error', (error: Error) => {
+  console.error('Bot error:', error);
+});
+```
+
+<ParamField path="error" type="Error">
+  Error object describing what went wrong
+</ParamField>
+
+<Warning>
+  Always handle the `error` event to prevent unhandled promise rejections.
+</Warning>
+
+## Complete Example
+
+```typescript
+import { Bot } from 'wapi';
+import { randomUUID } from 'node:crypto';
+import qrcode from 'qrcode-terminal';
+
+// Create bot instance
+const bot = new Bot(
+  randomUUID(),
+  authHandler,
+  { jid: '', pn: '', name: '' }
+);
+
+// Set custom prefix
+bot.prefix = '!/';
+
+// Global middleware
+bot.use(async (ctx, next) => {
+  console.log(`Message from ${ctx.from.name}: ${ctx.text}`);
+  await next();
+});
+
+// Register commands
+bot.command('ping', async (ctx) => {
+  await ctx.reply(`🏓 Pong! (${bot.ping.toFixed(0)}ms)`);
+});
+
+bot.command('help', async (ctx) => {
+  await ctx.reply(`
+Available commands:
+• !ping - Check bot latency
+• !help - Show this message
+  `.trim());
+});
+
+bot.command('groups', async (ctx) => {
+  if (ctx.chat.type !== 'group') {
+    await ctx.reply('❌ This command only works in groups');
+    return;
+  }
+  
+  const metadata = await bot.groupMetadata(ctx.chat.jid);
+  if (!metadata) {
+    await ctx.reply('❌ Failed to get group info');
+    return;
+  }
+  
+  await ctx.reply(`
+Group: ${metadata.subject}
+Members: ${metadata.participants.length}
+Created: ${new Date(metadata.creation * 1000).toLocaleDateString()}
+  `.trim());
+});
+
+// Event handlers
+bot.on('qr', (qr) => {
+  qrcode.generate(qr, { small: true });
+});
+
+bot.on('open', (account) => {
+  console.log(`✅ Logged in as ${account.name}`);
+});
+
+bot.on('close', (reason) => {
+  console.log(`❌ Disconnected: ${reason}`);
+});
+
+bot.on('error', (error) => {
+  console.error('Error:', error);
+});
+
+// Start bot
+await bot.login('qr');
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Context" icon="message" href="/api/context">
+    Learn about the Context object passed to middleware
+  </Card>
+  <Card title="Message Builder" icon="hammer" href="/api/message-builder">
+    Build formatted messages easily
+  </Card>
+</CardGroup>

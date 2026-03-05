@@ -1,0 +1,737 @@
+---
+title: 'Context'
+description: 'Message context object with reply methods and metadata'
+icon: 'message'
+---
+
+The `Context` class represents an incoming message with its metadata and provides convenient methods for replying. It extends the `Message` class and is passed to all middleware functions.
+
+## Import
+
+```typescript
+import type { Context } from 'wapi';
+```
+
+<Note>
+  Context objects are automatically created by the Bot and passed to your middleware. You typically don't instantiate them directly.
+</Note>
+
+## Properties
+
+### Bot Reference
+
+<ResponseField name="bot" type="Bot">
+  Reference to the parent Bot instance
+</ResponseField>
+
+```typescript
+bot.command('ping', async (ctx) => {
+  // Access bot properties through ctx
+  await ctx.reply(`Latency: ${ctx.bot.ping}ms`);
+});
+```
+
+### Command Information
+
+<ResponseField name="prefixUsed" type="string">
+  The prefix character used to invoke the command (e.g., `"!"` or `"/"`). Empty string if not a command.
+</ResponseField>
+
+<ResponseField name="commandName" type="string">
+  The command name in lowercase (without prefix). Empty string if not a command.
+</ResponseField>
+
+<ResponseField name="args" type="string[]">
+  Array of command arguments (space-separated words after the command name)
+</ResponseField>
+
+<CodeGroup>
+```typescript Example: Parse Arguments
+bot.command('calc', async (ctx) => {
+  // User sent: "!calc 10 + 20"
+  console.log(ctx.prefixUsed);   // "!"
+  console.log(ctx.commandName);  // "calc"
+  console.log(ctx.args);         // ["10", "+", "20"]
+  
+  const [a, op, b] = ctx.args;
+  // Perform calculation...
+});
+```
+
+```typescript Example: Argument Validation
+bot.command('kick', async (ctx) => {
+  if (ctx.args.length === 0) {
+    await ctx.reply('❌ Usage: !kick @user');
+    return;
+  }
+  
+  const target = ctx.mentions[0];
+  if (!target) {
+    await ctx.reply('❌ Please mention a user to kick');
+    return;
+  }
+  
+  // Kick user...
+});
+```
+</CodeGroup>
+
+### Message Properties (from Message class)
+
+<ResponseField name="message" type="WAMessage">
+  Raw Baileys message object
+</ResponseField>
+
+<ResponseField name="chat" type="IChat">
+  Chat information:
+  <Expandable title="IChat Properties">
+    <ResponseField name="jid" type="string">
+      Chat JID identifier
+    </ResponseField>
+    <ResponseField name="pn" type="string">
+      Phone number (for private chats)
+    </ResponseField>
+    <ResponseField name="type" type="'private' | 'group' | 'unknown'">
+      Chat type
+    </ResponseField>
+    <ResponseField name="addressing" type="'pn' | 'lid' | 'unknown'">
+      Addressing mode used
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Chat display name
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="from" type="IFrom">
+  Sender information:
+  <Expandable title="IFrom Properties">
+    <ResponseField name="jid" type="string">
+      Sender JID
+    </ResponseField>
+    <ResponseField name="pn" type="string">
+      Sender phone number
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Sender display name
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="type" type="keyof proto.IMessage">
+  Message type: `"conversation"`, `"imageMessage"`, `"videoMessage"`, `"audioMessage"`, `"documentMessage"`, `"stickerMessage"`, etc.
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  Unique message ID
+</ResponseField>
+
+<ResponseField name="timestamp" type="number">
+  Message timestamp (Unix epoch in milliseconds)
+</ResponseField>
+
+<ResponseField name="hash" type="string">
+  File SHA256 hash (for media messages)
+</ResponseField>
+
+<ResponseField name="mimetype" type="string">
+  MIME type (for media messages)
+</ResponseField>
+
+<ResponseField name="text" type="string">
+  Message text content (or caption for media)
+</ResponseField>
+
+<ResponseField name="size" type="number">
+  File size in bytes (for media) or text length
+</ResponseField>
+
+<ResponseField name="mentions" type="string[]">
+  Array of mentioned user JIDs
+</ResponseField>
+
+<ResponseField name="links" type="string[]">
+  Array of URLs, emails, and phone numbers found in the message
+</ResponseField>
+
+<ResponseField name="quoted" type="Message | undefined">
+  Quoted/replied message object (if this is a reply)
+</ResponseField>
+
+<CodeGroup>
+```typescript Example: Access Message Info
+bot.use(async (ctx, next) => {
+  console.log(`From: ${ctx.from.name}`);
+  console.log(`Chat: ${ctx.chat.name} (${ctx.chat.type})`);
+  console.log(`Type: ${ctx.type}`);
+  console.log(`Text: ${ctx.text}`);
+  console.log(`Time: ${new Date(ctx.timestamp)}`);
+  
+  if (ctx.mentions.length > 0) {
+    console.log(`Mentions: ${ctx.mentions.join(', ')}`);
+  }
+  
+  if (ctx.quoted) {
+    console.log(`Replying to: ${ctx.quoted.text}`);
+  }
+  
+  await next();
+});
+```
+
+```typescript Example: Check Message Type
+bot.use(async (ctx, next) => {
+  if (ctx.type === 'imageMessage') {
+    console.log('Received an image');
+    console.log(`Size: ${ctx.size} bytes`);
+    console.log(`MIME: ${ctx.mimetype}`);
+  } else if (ctx.type === 'conversation') {
+    console.log('Received text message');
+  }
+  
+  await next();
+});
+```
+</CodeGroup>
+
+## Methods
+
+### reply()
+
+Sends a text reply to the message.
+
+```typescript
+await ctx.reply(text: string, options?: IReplyOptions): Promise<Context>
+```
+
+<ParamField path="text" type="string" required>
+  Reply text content
+</ParamField>
+
+<ParamField path="options" type="IReplyOptions">
+  Optional reply options:
+  <Expandable title="IReplyOptions">
+    <ResponseField name="mentions" type="string[]">
+      Additional user JIDs to mention
+    </ResponseField>
+    <ResponseField name="contextInfo" type="proto.IContextInfo">
+      Additional context information (advanced)
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Context>">
+  Context object for the sent reply
+</ResponseField>
+
+<CodeGroup>
+```typescript Simple Reply
+bot.command('hello', async (ctx) => {
+  await ctx.reply('Hello there! 👋');
+});
+```
+
+```typescript Reply with Mention
+bot.command('greet', async (ctx) => {
+  await ctx.reply(
+    `Hello @${ctx.from.pn}! Welcome to the group.`,
+    { mentions: [ctx.from.jid] }
+  );
+});
+```
+
+```typescript Chain Replies
+bot.command('story', async (ctx) => {
+  await ctx.reply('Once upon a time...');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  await ctx.reply('There was a brave developer...');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  await ctx.reply('Who built an amazing bot! 🎉');
+});
+```
+</CodeGroup>
+
+### replyWithImage()
+
+Sends an image reply to the message.
+
+```typescript
+await ctx.replyWithImage(
+  image: string | Buffer,
+  options?: IReplyWithImageOptions
+): Promise<Context>
+```
+
+<ParamField path="image" type="string | Buffer" required>
+  Image data as Buffer or URL string
+</ParamField>
+
+<ParamField path="options" type="IReplyWithImageOptions">
+  <Expandable title="IReplyWithImageOptions">
+    <ResponseField name="caption" type="string">
+      Image caption text
+    </ResponseField>
+    <ResponseField name="mimetype" type="string">
+      MIME type (default: `"image/jpeg"`)
+    </ResponseField>
+    <ResponseField name="viewOnce" type="boolean">
+      Send as view-once message
+    </ResponseField>
+    <ResponseField name="mentions" type="string[]">
+      User JIDs to mention in caption
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Context>">
+  Context object for the sent image
+</ResponseField>
+
+<CodeGroup>
+```typescript From URL
+bot.command('cat', async (ctx) => {
+  await ctx.replyWithImage(
+    'https://cataas.com/cat',
+    { caption: 'Here\'s a random cat! 🐱' }
+  );
+});
+```
+
+```typescript From Buffer
+import { readFile } from 'node:fs/promises';
+
+bot.command('logo', async (ctx) => {
+  const buffer = await readFile('./assets/logo.png');
+  await ctx.replyWithImage(buffer, {
+    caption: 'Our logo',
+    mimetype: 'image/png'
+  });
+});
+```
+
+```typescript View Once
+bot.command('secret', async (ctx) => {
+  await ctx.replyWithImage(
+    imageBuffer,
+    {
+      caption: 'This will disappear after viewing',
+      viewOnce: true
+    }
+  );
+});
+```
+</CodeGroup>
+
+### replyWithVideo()
+
+Sends a video reply to the message.
+
+```typescript
+await ctx.replyWithVideo(
+  video: string | Buffer,
+  options?: IReplyWithVideoOptions
+): Promise<Context>
+```
+
+<ParamField path="video" type="string | Buffer" required>
+  Video data as Buffer or URL string
+</ParamField>
+
+<ParamField path="options" type="IReplyWithVideoOptions">
+  <Expandable title="IReplyWithVideoOptions">
+    <ResponseField name="caption" type="string">
+      Video caption text
+    </ResponseField>
+    <ResponseField name="mimetype" type="string">
+      MIME type (default: `"video/mp4"`)
+    </ResponseField>
+    <ResponseField name="viewOnce" type="boolean">
+      Send as view-once message
+    </ResponseField>
+    <ResponseField name="gifPlayback" type="boolean">
+      Play as GIF (loop without sound)
+    </ResponseField>
+    <ResponseField name="mentions" type="string[]">
+      User JIDs to mention in caption
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Context>">
+  Context object for the sent video
+</ResponseField>
+
+<CodeGroup>
+```typescript Video Reply
+bot.command('tutorial', async (ctx) => {
+  await ctx.replyWithVideo(
+    'https://example.com/tutorial.mp4',
+    { caption: 'Watch this tutorial' }
+  );
+});
+```
+
+```typescript GIF Playback
+bot.command('dance', async (ctx) => {
+  await ctx.replyWithVideo(
+    videoBuffer,
+    {
+      gifPlayback: true,
+      caption: 'Dancing! 💃'
+    }
+  );
+});
+```
+</CodeGroup>
+
+### replyWithAudio()
+
+Sends an audio reply to the message.
+
+```typescript
+await ctx.replyWithAudio(
+  audio: string | Buffer,
+  options?: IReplyWithAudioOptions
+): Promise<Context>
+```
+
+<ParamField path="audio" type="string | Buffer" required>
+  Audio data as Buffer or URL string
+</ParamField>
+
+<ParamField path="options" type="IReplyWithAudioOptions">
+  <Expandable title="IReplyWithAudioOptions">
+    <ResponseField name="mimetype" type="string">
+      MIME type (default: `"audio/mpeg"`)
+    </ResponseField>
+    <ResponseField name="viewOnce" type="boolean">
+      Send as view-once message
+    </ResponseField>
+    <ResponseField name="ptt" type="boolean">
+      Send as voice note (push-to-talk)
+    </ResponseField>
+    <ResponseField name="mentions" type="string[]">
+      User JIDs to mention
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Context>">
+  Context object for the sent audio
+</ResponseField>
+
+<CodeGroup>
+```typescript Audio File
+bot.command('song', async (ctx) => {
+  await ctx.replyWithAudio(
+    'https://example.com/song.mp3'
+  );
+});
+```
+
+```typescript Voice Note
+bot.command('voice', async (ctx) => {
+  await ctx.replyWithAudio(audioBuffer, {
+    ptt: true  // Send as voice note
+  });
+});
+```
+</CodeGroup>
+
+### replyWithSticker()
+
+Sends a sticker reply to the message.
+
+```typescript
+await ctx.replyWithSticker(
+  sticker: Buffer,
+  options?: IReplyOptions
+): Promise<Context>
+```
+
+<ParamField path="sticker" type="Buffer" required>
+  Sticker data as WebP Buffer
+</ParamField>
+
+<ParamField path="options" type="IReplyOptions">
+  Optional reply options (mentions, contextInfo)
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Context>">
+  Context object for the sent sticker
+</ResponseField>
+
+<Note>
+  Stickers must be in WebP format. Use a library like `sharp` to convert images to WebP.
+</Note>
+
+```typescript
+import sharp from 'sharp';
+
+bot.command('sticker', async (ctx) => {
+  if (ctx.type !== 'imageMessage') {
+    await ctx.reply('❌ Please send an image');
+    return;
+  }
+  
+  // Download the image
+  const imageBuffer = await ctx.download();
+  
+  // Convert to WebP sticker
+  const stickerBuffer = await sharp(imageBuffer)
+    .resize(512, 512, { fit: 'contain' })
+    .webp()
+    .toBuffer();
+  
+  await ctx.replyWithSticker(stickerBuffer);
+});
+```
+
+### del()
+
+Deletes the message.
+
+```typescript
+await ctx.del(): Promise<void>
+```
+
+<Warning>
+  Only works for messages sent by the bot (where `message.key.fromMe === true`) or messages in groups where the bot is an admin.
+</Warning>
+
+<CodeGroup>
+```typescript Auto-Delete Spam
+bot.use(async (ctx, next) => {
+  if (containsSpam(ctx.text)) {
+    await ctx.del();
+    await ctx.bot.sendMessage(
+      ctx.chat.jid,
+      { text: '⚠️ Spam message deleted' }
+    );
+    return; // Don't call next()
+  }
+  await next();
+});
+```
+
+```typescript Self-Destruct Command
+bot.command('secret', async (ctx) => {
+  const reply = await ctx.reply('🔥 This message will self-destruct in 5 seconds');
+  
+  setTimeout(async () => {
+    await reply.del();
+  }, 5000);
+});
+```
+</CodeGroup>
+
+### edit()
+
+Edits a message sent by the bot.
+
+```typescript
+await ctx.edit(text: string): Promise<Context>
+```
+
+<ParamField path="text" type="string" required>
+  New message text
+</ParamField>
+
+<ResponseField name="returns" type="Promise<Context>">
+  Context object for the edited message
+</ResponseField>
+
+<Warning>
+  Only messages sent by the bot (`message.key.fromMe === true`) can be edited.
+</Warning>
+
+<CodeGroup>
+```typescript Edit Own Message
+bot.command('countdown', async (ctx) => {
+  const msg = await ctx.reply('Starting in 3...');
+  
+  await new Promise(r => setTimeout(r, 1000));
+  await msg.edit('Starting in 2...');
+  
+  await new Promise(r => setTimeout(r, 1000));
+  await msg.edit('Starting in 1...');
+  
+  await new Promise(r => setTimeout(r, 1000));
+  await msg.edit('🚀 Go!');
+});
+```
+
+```typescript Progress Updates
+bot.command('process', async (ctx) => {
+  const status = await ctx.reply('⏳ Processing: 0%');
+  
+  for (let i = 1; i <= 100; i += 10) {
+    await new Promise(r => setTimeout(r, 500));
+    await status.edit(`⏳ Processing: ${i}%`);
+  }
+  
+  await status.edit('✅ Complete!');
+});
+```
+</CodeGroup>
+
+### download()
+
+Downloads media content from the message.
+
+```typescript
+await ctx.download(): Promise<Buffer>
+```
+
+<ResponseField name="returns" type="Promise<Buffer>">
+  Media content as Buffer
+</ResponseField>
+
+<Note>
+  Only works for media messages (images, videos, audio, documents, stickers).
+</Note>
+
+<CodeGroup>
+```typescript Download and Process Image
+bot.use(async (ctx, next) => {
+  if (ctx.type === 'imageMessage') {
+    try {
+      const buffer = await ctx.download();
+      console.log(`Downloaded image: ${buffer.length} bytes`);
+      
+      // Process the image...
+      // await processImage(buffer);
+      
+    } catch (error) {
+      await ctx.reply('❌ Failed to download image');
+    }
+  }
+  await next();
+});
+```
+
+```typescript Save Document
+import { writeFile } from 'node:fs/promises';
+
+bot.use(async (ctx, next) => {
+  if (ctx.type === 'documentMessage') {
+    const buffer = await ctx.download();
+    const fileName = ctx.message.message?.documentMessage?.fileName || 'download';
+    
+    await writeFile(`./downloads/${fileName}`, buffer);
+    await ctx.reply(`✅ Saved: ${fileName}`);
+  }
+  await next();
+});
+```
+
+```typescript Image to Sticker
+import sharp from 'sharp';
+
+bot.command('sticker', async (ctx) => {
+  if (!['imageMessage', 'stickerMessage'].includes(ctx.type)) {
+    await ctx.reply('❌ Send an image with the command');
+    return;
+  }
+  
+  const imageBuffer = await ctx.download();
+  
+  const stickerBuffer = await sharp(imageBuffer)
+    .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .webp({ quality: 95 })
+    .toBuffer();
+  
+  await ctx.replyWithSticker(stickerBuffer);
+});
+```
+</CodeGroup>
+
+## Complete Example
+
+```typescript
+import { Bot } from 'wapi';
+import { MessageBuilder } from 'wapi';
+
+const bot = new Bot(/* ... */);
+
+// Logging middleware
+bot.use(async (ctx, next) => {
+  console.log(`[${ctx.chat.type}] ${ctx.from.name}: ${ctx.text}`);
+  await next();
+});
+
+// Anti-spam middleware
+bot.use(async (ctx, next) => {
+  if (ctx.text.toLowerCase().includes('spam')) {
+    await ctx.reply('⚠️ Please don\'t spam');
+    await ctx.del();
+    return;
+  }
+  await next();
+});
+
+// Info command
+bot.command('info', async (ctx) => {
+  const info = new MessageBuilder()
+    .addTitle('MESSAGE INFO')
+    .addBlankLine()
+    .addDescription(`ID: ${ctx.id}`)
+    .addDescription(`Type: ${ctx.type}`)
+    .addDescription(`From: ${ctx.from.name}`)
+    .addDescription(`Chat: ${ctx.chat.name}`)
+    .addDescription(`Time: ${new Date(ctx.timestamp).toLocaleString()}`)
+    .addBlankLine()
+    .addDescription(`Size: ${ctx.size} bytes`)
+    .addDescription(`Mentions: ${ctx.mentions.length}`)
+    .addDescription(`Links: ${ctx.links.length}`)
+    .build();
+  
+  await ctx.reply(info);
+});
+
+// Echo command
+bot.command('echo', async (ctx) => {
+  const text = ctx.args.join(' ');
+  if (!text) {
+    await ctx.reply('Usage: !echo <message>');
+    return;
+  }
+  await ctx.reply(text);
+});
+
+// Mention command
+bot.command('mention', async (ctx) => {
+  if (ctx.chat.type !== 'group') {
+    await ctx.reply('❌ This command only works in groups');
+    return;
+  }
+  
+  await ctx.reply(
+    `Hello @${ctx.from.pn}! 👋`,
+    { mentions: [ctx.from.jid] }
+  );
+});
+
+// Download media
+bot.use(async (ctx, next) => {
+  if (ctx.type === 'imageMessage' && ctx.text.includes('#download')) {
+    const buffer = await ctx.download();
+    await ctx.reply(`✅ Downloaded ${buffer.length} bytes`);
+    return;
+  }
+  await next();
+});
+
+await bot.login('qr');
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Bot" icon="robot" href="/api/bot">
+    Learn about the Bot class
+  </Card>
+  <Card title="Message Builder" icon="hammer" href="/api/message-builder">
+    Build formatted messages
+  </Card>
+</CardGroup>

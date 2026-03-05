@@ -1,0 +1,580 @@
+---
+title: 'MessageBuilder'
+description: 'Utility class for building formatted WhatsApp messages'
+icon: 'hammer'
+---
+
+The `MessageBuilder` class provides a fluent API for constructing formatted text messages with titles, subtitles, lists, and footers. All methods return `this` for easy method chaining.
+
+## Import
+
+```typescript
+import { MessageBuilder } from 'wapi';
+```
+
+## Constructor
+
+Creates a new MessageBuilder instance.
+
+```typescript
+const builder = new MessageBuilder();
+```
+
+## Methods
+
+All methods return the MessageBuilder instance for method chaining.
+
+### addTitle()
+
+Adds a centered, bold title with decorative brackets.
+
+```typescript
+builder.addTitle(title: string, width?: number): MessageBuilder
+```
+
+<ParamField path="title" type="string" required>
+  Title text to display
+</ParamField>
+
+<ParamField path="width" type="number" default={50}>
+  Total width for centering the title
+</ParamField>
+
+<ResponseField name="returns" type="MessageBuilder">
+  The MessageBuilder instance for chaining
+</ResponseField>
+
+**Output format:** `*『* {title} *』*` (centered)
+
+```typescript
+const message = new MessageBuilder()
+  .addTitle('WELCOME', 50)
+  .build();
+
+// Output:
+//                  *『* WELCOME *』*
+```
+
+### addSubTitle()
+
+Adds a centered, bold subtitle with smaller decorative brackets.
+
+```typescript
+builder.addSubTitle(subtitle: string, width?: number): MessageBuilder
+```
+
+<ParamField path="subtitle" type="string" required>
+  Subtitle text to display
+</ParamField>
+
+<ParamField path="width" type="number" default={25}>
+  Total width for centering the subtitle
+</ParamField>
+
+<ResponseField name="returns" type="MessageBuilder">
+  The MessageBuilder instance for chaining
+</ResponseField>
+
+**Output format:** `*「* {subtitle} *」*` (centered)
+
+```typescript
+const message = new MessageBuilder()
+  .addTitle('BOT INFO', 50)
+  .addSubTitle('v1.0.0', 25)
+  .build();
+
+// Output:
+//                  *『* BOT INFO *』*
+//          *「* v1.0.0 *」*
+```
+
+### addDescription()
+
+Adds a description line with an arrow prefix.
+
+```typescript
+builder.addDescription(description: string): MessageBuilder
+```
+
+<ParamField path="description" type="string" required>
+  Description text to add
+</ParamField>
+
+<ResponseField name="returns" type="MessageBuilder">
+  The MessageBuilder instance for chaining
+</ResponseField>
+
+**Output format:** `*»* {description}`
+
+```typescript
+const message = new MessageBuilder()
+  .addDescription('This is a WhatsApp bot')
+  .addDescription('Built with WAPI framework')
+  .build();
+
+// Output:
+// *»* This is a WhatsApp bot
+// *»* Built with WAPI framework
+```
+
+### addLine()
+
+Adds a plain line of text without any formatting.
+
+```typescript
+builder.addLine(line: string): MessageBuilder
+```
+
+<ParamField path="line" type="string" required>
+  Text line to add
+</ParamField>
+
+<ResponseField name="returns" type="MessageBuilder">
+  The MessageBuilder instance for chaining
+</ResponseField>
+
+```typescript
+const message = new MessageBuilder()
+  .addLine('Plain text line')
+  .addLine('Another plain line')
+  .build();
+
+// Output:
+// Plain text line
+// Another plain line
+```
+
+### addList()
+
+Adds multiple list items with bullet points or custom prefix.
+
+```typescript
+builder.addList(items: string[], prefix?: string): MessageBuilder
+```
+
+<ParamField path="items" type="string[]" required>
+  Array of list items to add
+</ParamField>
+
+<ParamField path="prefix" type="string" default="•">
+  Custom prefix for each list item (default is bullet point)
+</ParamField>
+
+<ResponseField name="returns" type="MessageBuilder">
+  The MessageBuilder instance for chaining
+</ResponseField>
+
+**Output format:** `*{prefix}* {item}` for each item
+
+<CodeGroup>
+```typescript Default Bullets
+const message = new MessageBuilder()
+  .addList([
+    'First item',
+    'Second item',
+    'Third item'
+  ])
+  .build();
+
+// Output:
+// *•* First item
+// *•* Second item
+// *•* Third item
+```
+
+```typescript Custom Prefix
+const message = new MessageBuilder()
+  .addList(
+    ['Option A', 'Option B', 'Option C'],
+    '→'
+  )
+  .build();
+
+// Output:
+// *→* Option A
+// *→* Option B
+// *→* Option C
+```
+
+```typescript Numbered List
+const items = ['Task 1', 'Task 2', 'Task 3'];
+const message = new MessageBuilder()
+  .addList(items.map((item, i) => `${i + 1}. ${item}`))
+  .build();
+
+// Output:
+// *•* 1. Task 1
+// *•* 2. Task 2
+// *•* 3. Task 3
+```
+</CodeGroup>
+
+<Note>
+  Empty items in the array are automatically skipped.
+</Note>
+
+### addBlankLine()
+
+Adds an empty line for spacing.
+
+```typescript
+builder.addBlankLine(): MessageBuilder
+```
+
+<ResponseField name="returns" type="MessageBuilder">
+  The MessageBuilder instance for chaining
+</ResponseField>
+
+```typescript
+const message = new MessageBuilder()
+  .addTitle('SECTION 1')
+  .addDescription('Content here')
+  .addBlankLine()
+  .addTitle('SECTION 2')
+  .addDescription('More content')
+  .build();
+
+// Output:
+// (centered) *『* SECTION 1 *』*
+// *»* Content here
+//
+// (centered) *『* SECTION 2 *』*
+// *»* More content
+```
+
+### addFooter()
+
+Adds a centered, italic footer text.
+
+```typescript
+builder.addFooter(footer: string, width?: number): MessageBuilder
+```
+
+<ParamField path="footer" type="string" required>
+  Footer text to display
+</ParamField>
+
+<ParamField path="width" type="number" default={50}>
+  Total width for centering the footer
+</ParamField>
+
+<ResponseField name="returns" type="MessageBuilder">
+  The MessageBuilder instance for chaining
+</ResponseField>
+
+**Output format:** `_{footer}_` (centered and italic)
+
+```typescript
+const message = new MessageBuilder()
+  .addTitle('MY BOT')
+  .addDescription('Does amazing things')
+  .addFooter('Powered by WAPI', 50)
+  .build();
+
+// Output:
+//              *『* MY BOT *』*
+// *»* Does amazing things
+//              _Powered by WAPI_
+```
+
+### build()
+
+Builds and returns the final formatted message string.
+
+```typescript
+builder.build(): string
+```
+
+<ResponseField name="returns" type="string">
+  The complete formatted message with all added elements joined by newlines
+</ResponseField>
+
+```typescript
+const message = new MessageBuilder()
+  .addTitle('MENU')
+  .addList(['Option 1', 'Option 2'])
+  .build();
+
+// Returns the complete string ready to send
+await ctx.reply(message);
+```
+
+## Complete Examples
+
+### Help Menu
+
+```typescript
+import { MessageBuilder } from 'wapi';
+
+bot.command('help', async (ctx) => {
+  const help = new MessageBuilder()
+    .addTitle('BOT COMMANDS', 60)
+    .addBlankLine()
+    .addSubTitle('General', 30)
+    .addList([
+      '!help - Show this menu',
+      '!ping - Check bot latency',
+      '!info - Bot information'
+    ])
+    .addBlankLine()
+    .addSubTitle('Media', 30)
+    .addList([
+      '!sticker - Convert image to sticker',
+      '!download - Download media',
+      '!meme - Generate random meme'
+    ])
+    .addBlankLine()
+    .addSubTitle('Group', 30)
+    .addList([
+      '!members - List group members',
+      '!kick @user - Kick a member',
+      '!promote @user - Make admin'
+    ])
+    .addBlankLine()
+    .addFooter('Use prefix ! or /', 60)
+    .build();
+  
+  await ctx.reply(help);
+});
+```
+
+### Status Report
+
+```typescript
+bot.command('status', async (ctx) => {
+  const uptime = process.uptime();
+  const hours = Math.floor(uptime / 3600);
+  const minutes = Math.floor((uptime % 3600) / 60);
+  
+  const status = new MessageBuilder()
+    .addTitle('BOT STATUS', 50)
+    .addBlankLine()
+    .addDescription(`Status: ${ctx.bot.status}`)
+    .addDescription(`Uptime: ${hours}h ${minutes}m`)
+    .addDescription(`Latency: ${ctx.bot.ping.toFixed(0)}ms`)
+    .addDescription(`Memory: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)}MB`)
+    .addBlankLine()
+    .addFooter(`Checked at ${new Date().toLocaleTimeString()}`, 50)
+    .build();
+  
+  await ctx.reply(status);
+});
+```
+
+### Group Info
+
+```typescript
+bot.command('groupinfo', async (ctx) => {
+  if (ctx.chat.type !== 'group') {
+    await ctx.reply('❌ This command only works in groups');
+    return;
+  }
+  
+  const metadata = await ctx.bot.groupMetadata(ctx.chat.jid);
+  if (!metadata) {
+    await ctx.reply('❌ Failed to get group info');
+    return;
+  }
+  
+  const admins = metadata.participants
+    .filter(p => p.admin)
+    .map(p => p.id.split('@')[0]);
+  
+  const info = new MessageBuilder()
+    .addTitle(metadata.subject, 60)
+    .addBlankLine()
+    .addDescription(`Created: ${new Date(metadata.creation * 1000).toLocaleDateString()}`)
+    .addDescription(`Members: ${metadata.participants.length}`)
+    .addDescription(`Admins: ${admins.length}`)
+    .addBlankLine()
+    .addSubTitle('Description', 40)
+    .addLine(metadata.desc || 'No description')
+    .addBlankLine()
+    .addSubTitle('Settings', 40)
+    .addList([
+      `Announcement Mode: ${metadata.announce ? 'ON' : 'OFF'}`,
+      `Edit Info: ${metadata.restrict ? 'Admins only' : 'All members'}`
+    ])
+    .build();
+  
+  await ctx.reply(info);
+});
+```
+
+### Welcome Message
+
+```typescript
+import { MessageBuilder } from 'wapi';
+
+bot.use(async (ctx, next) => {
+  // Check if this is a group participant add event
+  // (this is simplified - you'd need to handle group events)
+  
+  if (ctx.chat.type === 'group' && isNewMember) {
+    const welcome = new MessageBuilder()
+      .addTitle('WELCOME! 🎉', 50)
+      .addBlankLine()
+      .addDescription(`Welcome to ${ctx.chat.name}!`)
+      .addBlankLine()
+      .addSubTitle('Rules', 30)
+      .addList([
+        'Be respectful to everyone',
+        'No spam or ads',
+        'Stay on topic',
+        'Have fun!'
+      ], '✓')
+      .addBlankLine()
+      .addFooter('Type !help for bot commands', 50)
+      .build();
+    
+    await ctx.reply(welcome);
+  }
+  
+  await next();
+});
+```
+
+### Search Results
+
+```typescript
+bot.command('search', async (ctx) => {
+  const query = ctx.args.join(' ');
+  if (!query) {
+    await ctx.reply('Usage: !search <query>');
+    return;
+  }
+  
+  // Perform search...
+  const results = await performSearch(query);
+  
+  const message = new MessageBuilder()
+    .addTitle('SEARCH RESULTS', 60)
+    .addSubTitle(`Query: "${query}"`, 40)
+    .addBlankLine()
+    .addDescription(`Found ${results.length} results:`);
+  
+  if (results.length > 0) {
+    message.addBlankLine();
+    message.addList(
+      results.slice(0, 10).map((r, i) => `${r.title} - ${r.url}`),
+      '🔍'
+    );
+    
+    if (results.length > 10) {
+      message.addBlankLine();
+      message.addDescription(`...and ${results.length - 10} more results`);
+    }
+  } else {
+    message.addDescription('No results found');
+  }
+  
+  message.addFooter('Powered by Search API', 60);
+  
+  await ctx.reply(message.build());
+});
+```
+
+### Custom Formatted Menu
+
+```typescript
+bot.command('menu', async (ctx) => {
+  const menu = new MessageBuilder()
+    .addLine('╔════════════════════════╗')
+    .addLine('║    🤖 BOT MENU 🤖     ║')
+    .addLine('╚════════════════════════╝')
+    .addBlankLine()
+    .addList([
+      'ping → Check latency',
+      'help → Commands list',
+      'info → Bot details',
+      'status → System status'
+    ], '▸')
+    .addBlankLine()
+    .addLine('╔════════════════════════╗')
+    .addLine('║   Use ! or / prefix    ║')
+    .addLine('╚════════════════════════╝')
+    .build();
+  
+  await ctx.reply(menu);
+});
+```
+
+## Tips and Best Practices
+
+<Tabs>
+  <Tab title="Spacing">
+    Use `addBlankLine()` generously to improve readability:
+    
+    ```typescript
+    const message = new MessageBuilder()
+      .addTitle('TITLE')
+      .addBlankLine()  // Space after title
+      .addDescription('Content')
+      .addBlankLine()  // Space before footer
+      .addFooter('Footer')
+      .build();
+    ```
+  </Tab>
+  
+  <Tab title="Width">
+    Adjust width parameters based on your content:
+    
+    ```typescript
+    const message = new MessageBuilder()
+      .addTitle('LONG TITLE HERE', 70)  // Wider for long titles
+      .addSubTitle('Short', 20)         // Narrower for short text
+      .addFooter('Medium length footer', 50)
+      .build();
+    ```
+  </Tab>
+  
+  <Tab title="Prefixes">
+    Use meaningful prefixes for lists:
+    
+    ```typescript
+    const message = new MessageBuilder()
+      .addList(commands, '🔹')      // For features
+      .addList(warnings, '⚠️')      // For warnings
+      .addList(tasks, '✓')         // For completed items
+      .addList(options, '→')       // For navigation
+      .build();
+    ```
+  </Tab>
+  
+  <Tab title="Dynamic Content">
+    Build messages dynamically:
+    
+    ```typescript
+    const builder = new MessageBuilder()
+      .addTitle('USERS');
+    
+    if (users.length === 0) {
+      builder.addDescription('No users found');
+    } else {
+      builder.addList(users.map(u => u.name));
+    }
+    
+    if (isAdmin) {
+      builder.addBlankLine();
+      builder.addDescription('Admin view enabled');
+    }
+    
+    await ctx.reply(builder.build());
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  Empty strings are automatically ignored by all methods, so you can safely pass empty values without adding unwanted lines.
+</Note>
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Context" icon="message" href="/api/context">
+    Learn how to send messages with Context
+  </Card>
+  <Card title="Bot" icon="robot" href="/api/bot">
+    Explore the Bot class
+  </Card>
+</CardGroup>

@@ -1,0 +1,624 @@
+---
+title: 'Authentication'
+description: 'Managing bot sessions with flexible authentication strategies'
+icon: 'key'
+---
+
+## Overview
+
+WAPI provides a flexible authentication system that allows you to persist WhatsApp sessions across different storage backends. All authentication strategies implement the `IBotAuth` interface, ensuring consistent behavior regardless of your chosen storage method.
+
+<CardGroup cols={3}>
+  <Card title="LocalAuth" icon="folder">
+    File-based storage for simple deployments
+  </Card>
+  <Card title="RedisAuth" icon="database">
+    Redis storage for distributed systems
+  </Card>
+  <Card title="MongoAuth" icon="leaf">
+    MongoDB storage for document-based persistence
+  </Card>
+</CardGroup>
+
+## IBotAuth Interface
+
+All authentication strategies implement this interface from `src/types/bot.ts`:
+
+```typescript
+export interface IBotAuth {
+  init: () => Promise<IBotAuthInit>;
+  save: () => Promise<void>;
+  remove: () => Promise<void>;
+}
+
+export interface IBotAuthInit {
+  creds: AuthenticationCreds;
+  keys: SignalKeyStore;
+}
+```
+
+### Methods
+
+- **init()**: Initializes and loads the authentication state (credentials and encryption keys)
+- **save()**: Persists the current authentication state
+- **remove()**: Deletes the authentication state (logout)
+
+<Note>
+  All auth data is encrypted using AES-256-GCM with the bot's UUID as the encryption key. This ensures session security even if storage is compromised.
+</Note>
+
+## Authentication Strategies
+
+<Tabs>
+  <Tab title="LocalAuth">
+    ### LocalAuth
+
+    File-based authentication that stores session data in encrypted files on the local filesystem.
+
+    **When to use:**
+    - Single-server deployments
+    - Development and testing
+    - Simple bot setups without infrastructure dependencies
+
+    ### Usage
+
+    ```typescript
+    import { Bot, LocalAuth } from 'wapi';
+    import { randomUUID } from 'crypto';
+
+    const uuid = randomUUID();
+    const auth = new LocalAuth(uuid, './sessions');
+    const bot = new Bot(uuid, auth, {
+      jid: '',
+      pn: '+1234567890',
+      name: 'My Bot'
+    });
+
+    await bot.login('qr');
+    ```
+
+    ### Constructor
+
+    ```typescript
+    constructor(uuid: UUID, directory: string)
+    ```
+
+    **Parameters:**
+    - `uuid`: Unique identifier for the bot (used as encryption key)
+    - `directory`: Path where session files will be stored (relative or absolute)
+
+    ### How It Works
+
+    From `src/core/auth/local.ts`:
+
+    ```typescript
+    export class LocalAuth {
+      private directory: string;
+      private aes: AES256GCM;
+      private cache = new Map<string, Buffer>();
+      private creds?: AuthenticationCreds;
+      public uuid: UUID;
+
+      constructor(uuid: UUID, directory: string) {
+        if (!isUUID(uuid)) {
+          throw new Error(`'${uuid}' is not a valid UUID.`);
+        }
+        // Creates a subdirectory named after the UUID
+        this.directory = path.isAbsolute(directory) 
+          ? path.join(directory, uuid) 
+          : path.resolve(directory, uuid);
+        this.aes = new AES256GCM(uuid);
+        this.uuid = uuid;
+      }
+    }
+    ```
+
+    ### Storage Structure
+
+    ```
+    sessions/
+    └── 550e8400-e29b-41d4-a716-446655440000/
+        ├── 5d41402abc4b2a76b9719d911017c592.enc  # creds
+        ├── 7a614fd4c3b8f6e91d02c8b1f3b3e6e2.enc  # pre-key-1
+        └── ...
+    ```
+
+    Each file is:
+    - Named using MD5 hash of the key
+    - Encrypted with AES-256-GCM
+    - Cached in memory after first read
+
+    ### Example: Complete Setup
+
+    ```typescript
+    import { Bot, LocalAuth } from 'wapi';
+    import { randomUUID } from 'crypto';
+    import path from 'path';
+
+    // Store sessions in a specific directory
+    const sessionsDir = path.join(__dirname, 'data', 'sessions');
+    const uuid = randomUUID();
+    const auth = new LocalAuth(uuid, sessionsDir);
+
+    const bot = new Bot(uuid, auth, {
+      jid: '',
+      pn: '',
+      name: 'LocalAuth Bot'
+    });
+
+    bot.on('open', (account) => {
+      console.log('Session saved to:', auth['directory']);
+    });
+
+    await bot.login('qr');
+    ```
+
+    <Tip>
+      LocalAuth creates the directory automatically if it doesn't exist. The session files persist across bot restarts, so you only need to scan the QR code once.
+    </Tip>
+
+  </Tab>
+
+  <Tab title="RedisAuth">
+    ### RedisAuth
+
+    Redis-based authentication for distributed systems and high-performance applications.
+
+    **When to use:**
+    - Multi-server deployments
+    - Microservices architecture
+    - Need for session sharing across instances
+    - High-availability requirements
+
+    ### Usage
+
+    ```typescript
+    import { Bot, RedisAuth } from 'wapi';
+    import { randomUUID } from 'crypto';
+    import Redis from 'ioredis';
+
+    const redis = new Redis({
+      host: 'localhost',
+      port: 6379,
+      password: 'your-password'
+    });
+
+    const uuid = randomUUID();
+    const auth = new RedisAuth(uuid, redis, 'wapi');
+    const bot = new Bot(uuid, auth, {
+      jid: '',
+      pn: '+1234567890',
+      name: 'My Bot'
+    });
+
+    await bot.login('qr');
+    ```
+
+    ### Constructor
+
+    ```typescript
+    constructor(uuid: UUID, redis: Redis, prefix: string)
+    ```
+
+    **Parameters:**
+    - `uuid`: Unique identifier for the bot
+    - `redis`: ioredis client instance
+    - `prefix`: Key prefix for Redis storage (default: `'wapi'`)
+
+    ### How It Works
+
+    From `src/core/auth/redis.ts`:
+
+    ```typescript
+    export class RedisAuth {
+      private prefix: string;
+      private aes: AES256GCM;
+      private cache = new Map<string, Buffer>();
+      private creds?: AuthenticationCreds;
+      private redis: Redis;
+      public uuid: UUID;
+
+      constructor(uuid: UUID, redis: Redis, prefix: string) {
+        if (!isUUID(uuid)) {
+          throw new Error(`'${uuid}' is not a valid UUID.`);
+        }
+        // Keys are stored as: prefix:uuid:md5hash
+        this.prefix = `${prefix}:${uuid}:`;
+        this.aes = new AES256GCM(uuid);
+        this.redis = redis;
+        this.uuid = uuid;
+      }
+    }
+    ```
+
+    ### Redis Key Structure
+
+    ```
+    wapi:550e8400-e29b-41d4-a716-446655440000:5d41402abc4b2a76b9719d911017c592
+    wapi:550e8400-e29b-41d4-a716-446655440000:7a614fd4c3b8f6e91d02c8b1f3b3e6e2
+    └─┬─ └──────────────────┬──────────────────┘ └──────────┬──────────┘
+      │                    │                               │
+    prefix                uuid                        MD5 hash of key
+    ```
+
+    ### Example: Redis Cluster
+
+    ```typescript
+    import { Bot, RedisAuth } from 'wapi';
+    import { randomUUID } from 'crypto';
+    import Redis from 'ioredis';
+
+    // Redis Cluster configuration
+    const redis = new Redis.Cluster([
+      { host: 'redis-1', port: 6379 },
+      { host: 'redis-2', port: 6379 },
+      { host: 'redis-3', port: 6379 }
+    ], {
+      redisOptions: {
+        password: 'your-password'
+      }
+    });
+
+    const uuid = randomUUID();
+    const auth = new RedisAuth(uuid, redis, 'wapi:prod');
+    const bot = new Bot(uuid, auth, {
+      jid: '',
+      pn: '',
+      name: 'Redis Cluster Bot'
+    });
+
+    await bot.login('qr');
+    ```
+
+    ### Session Cleanup
+
+    ```typescript
+    // Remove all session data
+    await auth.remove();
+
+    // Or manually clean up in Redis
+    const keys = await redis.keys('wapi:*');
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+    ```
+
+    <Warning>
+      RedisAuth uses `getBuffer()` and stores binary data. Ensure your Redis client is configured to handle binary data properly.
+    </Warning>
+
+  </Tab>
+
+  <Tab title="MongoAuth">
+    ### MongoAuth
+
+    MongoDB-based authentication for document-oriented storage.
+
+    **When to use:**
+    - Already using MongoDB in your stack
+    - Need queryable session metadata
+    - Document-based data architecture
+    - Multi-region deployments with MongoDB Atlas
+
+    ### Usage
+
+    ```typescript
+    import { Bot, MongoAuth } from 'wapi';
+    import { randomUUID } from 'crypto';
+    import { MongoClient } from 'mongodb';
+
+    const client = new MongoClient('mongodb://localhost:27017');
+    await client.connect();
+
+    const db = client.db('wapi');
+    const collection = db.collection('sessions');
+
+    const uuid = randomUUID();
+    const auth = new MongoAuth(uuid, collection);
+    const bot = new Bot(uuid, auth, {
+      jid: '',
+      pn: '+1234567890',
+      name: 'My Bot'
+    });
+
+    await bot.login('qr');
+    ```
+
+    ### Constructor
+
+    ```typescript
+    constructor(uuid: UUID, collection: Collection<IAuthState>)
+    ```
+
+    **Parameters:**
+    - `uuid`: Unique identifier for the bot
+    - `collection`: MongoDB collection for storing session data
+
+    ### Document Schema
+
+    From `src/core/auth/mongo.ts`:
+
+    ```typescript
+    interface IAuthState extends Document {
+      uuid: UUID;
+      key: string;      // MD5 hash of the key name
+      encrypted: string; // Base64-encoded encrypted data
+    }
+    ```
+
+    ### How It Works
+
+    ```typescript
+    export class MongoAuth {
+      private aes: AES256GCM;
+      private cache = new Map<string, Buffer>();
+      private creds?: AuthenticationCreds;
+      private collection: Collection<IAuthState>;
+      public uuid: UUID;
+
+      constructor(uuid: UUID, collection: Collection<IAuthState>) {
+        if (!isUUID(uuid)) {
+          throw new Error(`'${uuid}' is not a valid UUID.`);
+        }
+        this.collection = collection;
+        this.aes = new AES256GCM(uuid);
+        this.uuid = uuid;
+      }
+    }
+    ```
+
+    ### MongoDB Documents
+
+    ```json
+    {
+      "_id": ObjectId("..."),
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "key": "5d41402abc4b2a76b9719d911017c592",
+      "encrypted": "base64-encoded-encrypted-data..."
+    }
+    ```
+
+    ### Example: MongoDB Atlas
+
+    ```typescript
+    import { Bot, MongoAuth } from 'wapi';
+    import { randomUUID } from 'crypto';
+    import { MongoClient } from 'mongodb';
+
+    const uri = 'mongodb+srv://username:password@cluster.mongodb.net';
+    const client = new MongoClient(uri);
+    await client.connect();
+
+    const db = client.db('wapi_production');
+    const collection = db.collection('bot_sessions');
+
+    // Create index for better performance
+    await collection.createIndex({ uuid: 1, key: 1 }, { unique: true });
+
+    const uuid = randomUUID();
+    const auth = new MongoAuth(uuid, collection);
+    const bot = new Bot(uuid, auth, {
+      jid: '',
+      pn: '',
+      name: 'MongoDB Atlas Bot'
+    });
+
+    await bot.login('qr');
+    ```
+
+    ### Querying Sessions
+
+    ```typescript
+    // Get all sessions for a specific bot
+    const sessions = await collection.find({ uuid }).toArray();
+    console.log(`Found ${sessions.length} session keys`);
+
+    // Remove all sessions for a bot
+    await collection.deleteMany({ uuid });
+
+    // Count total bots
+    const uniqueBots = await collection.distinct('uuid');
+    console.log(`Total bots: ${uniqueBots.length}`);
+    ```
+
+    <Tip>
+      Create a compound index on `{uuid: 1, key: 1}` for optimal performance. MongoAuth uses `updateOne` with `upsert: true` for atomic updates.
+    </Tip>
+
+  </Tab>
+</Tabs>
+
+## Encryption Details
+
+All authentication strategies use AES-256-GCM encryption with the bot's UUID as the key:
+
+```typescript
+import { AES256GCM } from 'wapi';
+
+const aes = new AES256GCM(uuid);
+const encrypted = aes.encrypt(Buffer.from('sensitive data'));
+const decrypted = aes.decrypt(encrypted);
+```
+
+### Data Serialization
+
+Auth data is serialized with special handling for Buffer objects (from `src/core/auth/local.ts` lines 40-64):
+
+```typescript
+// Encryption: Buffer → Base64 → Encrypt
+const stringified = JSON.stringify(value, (_, value) => {
+  if (!isBuffer(value) && !isUint8Array(value) && value?.type !== "Buffer") {
+    return value;
+  }
+  return {
+    type: "Buffer",
+    data: Buffer.from(value.data ?? value).toString("base64"),
+  };
+});
+const encrypted = this.aes.encrypt(Buffer.from(stringified, "utf8"));
+
+// Decryption: Decrypt → Parse → Restore Buffers
+const decrypted = this.aes.decrypt(encrypted);
+const parsed = JSON.parse(decrypted.toString("utf8"), (_, value) => {
+  if (value?.type !== "Buffer" && !isString(value?.data)) {
+    return value;
+  }
+  return Buffer.from(value.data, "base64");
+});
+```
+
+## Session Lifecycle
+
+### 1. First Login (No Session)
+
+```typescript
+const auth = new LocalAuth(uuid, './sessions');
+
+// init() creates new credentials
+const { creds, keys } = await auth.init();
+// creds = initAuthCreds() - new session
+
+const bot = new Bot(uuid, auth, { jid: '', pn: '', name: '' });
+await bot.login('qr'); // Scan QR code
+
+// On successful connection, credentials are saved
+bot.on('open', async () => {
+  await auth.save(); // Persists session
+});
+```
+
+### 2. Subsequent Logins (Existing Session)
+
+```typescript
+const auth = new LocalAuth(uuid, './sessions');
+
+// init() loads existing credentials
+const { creds, keys } = await auth.init();
+// creds = loaded from storage - existing session
+
+const bot = new Bot(uuid, auth, { jid: '', pn: '', name: '' });
+await bot.login('qr'); // Connects automatically, no QR needed
+```
+
+### 3. Logout and Session Removal
+
+```typescript
+// Remove session and logout
+await bot.logout();
+await auth.remove(); // Deletes all session data
+
+// Or just disconnect without removing session
+await bot.disconnect();
+```
+
+## Credential Updates
+
+The bot automatically saves credentials when they change (from `src/core/bot.ts` lines 72-79):
+
+```typescript
+this.ws.ev.on("creds.update", async () => {
+  try {
+    await this.auth.save();
+  }
+  catch (e) {
+    this.emit("error", toError(e));
+  }
+});
+```
+
+<Note>
+  WhatsApp periodically rotates encryption keys. The `creds.update` event ensures your session stays current without manual intervention.
+</Note>
+
+## Multi-Bot Management
+
+Managing multiple bots with different UUIDs:
+
+```typescript
+import { Bot, LocalAuth } from 'wapi';
+import { randomUUID } from 'crypto';
+
+const bots = new Map();
+
+// Create multiple bots
+for (let i = 0; i < 3; i++) {
+  const uuid = randomUUID();
+  const auth = new LocalAuth(uuid, './sessions');
+  const bot = new Bot(uuid, auth, {
+    jid: '',
+    pn: `+123456789${i}`,
+    name: `Bot ${i + 1}`
+  });
+
+  bot.on('open', (account) => {
+    console.log(`Bot ${i + 1} connected:`, account.name);
+  });
+
+  bots.set(uuid, bot);
+  await bot.login('qr');
+}
+
+// Each bot has its own isolated session
+console.log(`Managing ${bots.size} bots`);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use environment-specific UUIDs">
+    ```typescript
+    // Store UUID in environment variables for production
+    const uuid = process.env.BOT_UUID || randomUUID();
+    ```
+  </Accordion>
+
+  <Accordion title="Handle auth errors gracefully">
+    ```typescript
+    try {
+      await auth.init();
+    } catch (error) {
+      console.error('Failed to initialize auth:', error);
+      // Fallback: create new session
+      await auth.remove();
+      await auth.init();
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Clean up on logout">
+    ```typescript
+    bot.on('close', async (reason) => {
+      if (reason.includes('401') || reason.includes('403')) {
+        // Auth error - remove invalid session
+        await auth.remove();
+      }
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="Monitor session health">
+    ```typescript
+    bot.on('open', async () => {
+      console.log('Session valid');
+      // Optional: backup session data
+    });
+
+    bot.on('error', (error) => {
+      if (error.message.includes('credentials')) {
+        console.error('Session corrupted');
+      }
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Bot Architecture" icon="cube" href="/concepts/bot-architecture">
+    Understand the event-driven architecture
+  </Card>
+  <Card title="Middleware" icon="layer-group" href="/concepts/middleware">
+    Build composable message handlers
+  </Card>
+</CardGroup>

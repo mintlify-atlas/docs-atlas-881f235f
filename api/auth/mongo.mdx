@@ -1,0 +1,898 @@
+---
+title: "MongoAuth"
+description: "Store WhatsApp sessions in MongoDB for centralized persistence"
+---
+
+## Overview
+
+The `MongoAuth` class provides persistent authentication storage using MongoDB. It enables centralized session management with the benefits of document-based storage, complex querying capabilities, and robust data persistence for production-grade bot deployments.
+
+### Key Features
+
+- **Document-Based Storage**: Store sessions as MongoDB documents
+- **Encrypted Storage**: All session data encrypted with AES-256-GCM
+- **Centralized Management**: Single source of truth for all sessions
+- **Query Capabilities**: Leverage MongoDB's powerful query engine
+- **Audit Trails**: Track session history and modifications
+- **Scalability**: Handle thousands of concurrent bot sessions
+
+<Note>
+  MongoAuth is ideal for production environments requiring centralized session management, audit capabilities, or existing MongoDB infrastructure.
+</Note>
+
+---
+
+## Installation
+
+MongoAuth requires the official MongoDB Node.js driver:
+
+<CodeGroup>
+
+```bash npm
+npm install mongodb
+```
+
+```bash yarn
+yarn add mongodb
+```
+
+```bash pnpm
+pnpm add mongodb
+```
+
+</CodeGroup>
+
+---
+
+## Constructor
+
+### `new MongoAuth(uuid, collection)`
+
+Creates a new MongoAuth instance for managing bot authentication in MongoDB.
+
+<ParamField path="uuid" type="UUID" required>
+  A valid UUID (v4) that uniquely identifies this bot instance. This UUID is used as the encryption key and stored with each document for session identification.
+</ParamField>
+
+<ParamField path="collection" type="Collection<IAuthState>" required>
+  A MongoDB collection instance where authentication documents will be stored. The collection should be typed with the `IAuthState` interface for type safety.
+</ParamField>
+
+#### Type Definition
+
+```typescript
+interface IAuthState extends Document {
+  uuid: UUID;
+  key: string;      // MD5 hash of the data key
+  encrypted: string; // Base64-encoded encrypted data
+}
+```
+
+#### Example
+
+<CodeGroup>
+
+```typescript Basic Usage
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const uuid = randomUUID();
+const auth = new MongoAuth(uuid, collection);
+
+const bot = new Bot({ auth });
+```
+
+```typescript With Connection String
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const uri = process.env.MONGODB_URI || "mongodb://localhost:27017";
+const client = new MongoClient(uri);
+
+await client.connect();
+
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const auth = new MongoAuth(randomUUID(), collection);
+const bot = new Bot({ auth });
+```
+
+```typescript MongoDB Atlas
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const uri = "mongodb+srv://<username>:<password>@cluster.mongodb.net/?retryWrites=true";
+const client = new MongoClient(uri);
+
+await client.connect();
+
+const db = client.db("production");
+const collection = db.collection("wapi_sessions");
+
+const auth = new MongoAuth(randomUUID(), collection);
+const bot = new Bot({ auth });
+```
+
+```typescript With Type Safety
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient, Collection, Document } from "mongodb";
+import { randomUUID } from "node:crypto";
+import type { UUID } from "node:crypto";
+
+interface IAuthState extends Document {
+  uuid: UUID;
+  key: string;
+  encrypted: string;
+}
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection: Collection<IAuthState> = db.collection("sessions");
+
+const auth = new MongoAuth(randomUUID(), collection);
+const bot = new Bot({ auth });
+```
+
+</CodeGroup>
+
+#### Throws
+
+- `Error`: If the provided UUID is not a valid UUID v4 format
+
+---
+
+## Properties
+
+### `uuid`
+
+<ResponseField name="uuid" type="UUID">
+  The UUID associated with this authentication instance. This is the same UUID provided to the constructor.
+</ResponseField>
+
+```typescript
+const auth = new MongoAuth(uuid, collection);
+console.log(auth.uuid); // "550e8400-e29b-41d4-a716-446655440000"
+```
+
+---
+
+## Methods
+
+### `init()`
+
+Initializes the authentication system by loading or creating credentials and setting up the key store.
+
+<CodeGroup>
+
+```typescript Signature
+init(): Promise<IBotAuthInit>
+```
+
+```typescript Interface
+interface IBotAuthInit {
+  creds: AuthenticationCreds;
+  keys: SignalKeyStore;
+}
+```
+
+</CodeGroup>
+
+#### Behavior
+
+1. **Credential Loading**: Queries MongoDB for existing credentials using the UUID
+2. **New Session**: If no credentials exist, generates new authentication credentials
+3. **Key Store Setup**: Initializes the Signal protocol key store for WhatsApp encryption
+4. **Cache Population**: Populates the in-memory cache with encrypted data
+
+#### Returns
+
+<Expandable title="IBotAuthInit">
+  <ResponseField name="creds" type="AuthenticationCreds">
+    WhatsApp authentication credentials containing account information, encryption keys, and session state. This is managed internally by the Baileys library.
+  </ResponseField>
+
+  <ResponseField name="keys" type="SignalKeyStore">
+    The Signal protocol key store used for end-to-end encryption. Provides `get()` and `set()` methods for managing cryptographic keys.
+  </ResponseField>
+</Expandable>
+
+#### Example
+
+```typescript
+import { MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const auth = new MongoAuth(randomUUID(), collection);
+
+// Initialize authentication
+const { creds, keys } = await auth.init();
+
+console.log("Credentials loaded:", !!creds);
+console.log("Keys initialized:", !!keys);
+```
+
+<Note>
+  This method is called automatically by the `Bot` class during initialization. You rarely need to call it directly.
+</Note>
+
+---
+
+### `save()`
+
+Persists the current authentication credentials to MongoDB.
+
+```typescript
+save(): Promise<void>
+```
+
+#### Behavior
+
+1. **Validation**: Ensures credentials have been loaded via `init()`
+2. **Serialization**: Converts credentials to JSON format
+3. **Encryption**: Encrypts the data using AES-256-GCM
+4. **Upsert**: Updates existing document or inserts new one
+5. **Cache Update**: Updates the in-memory cache
+
+#### MongoDB Operation
+
+```typescript
+await collection.updateOne(
+  { uuid: this.uuid, key: md5Hash },
+  { $set: { encrypted: encryptedData } },
+  { upsert: true }
+);
+```
+
+#### Throws
+
+- `Error`: If credentials haven't been initialized ("Credentials not loaded.")
+
+#### Example
+
+```typescript
+import { MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const auth = new MongoAuth(randomUUID(), collection);
+
+// Initialize and save
+await auth.init();
+await auth.save();
+
+console.log("Session saved to MongoDB");
+```
+
+<Warning>
+  The `Bot` class automatically saves credentials when authentication state changes. Manual calls to `save()` are typically unnecessary.
+</Warning>
+
+---
+
+### `remove()`
+
+Deletes all authentication data from MongoDB and clears the cache.
+
+```typescript
+remove(): Promise<void>
+```
+
+#### Behavior
+
+1. **Batch Deletion**: Deletes all documents matching the bot's UUID
+2. **Cache Clearing**: Clears the in-memory cache
+
+#### MongoDB Operation
+
+```typescript
+await collection.deleteMany({ uuid: this.uuid });
+```
+
+#### Example
+
+<CodeGroup>
+
+```typescript Basic Removal
+import { MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const uuid = randomUUID();
+const auth = new MongoAuth(uuid, collection);
+
+// Remove session data
+await auth.remove();
+console.log("Session removed from MongoDB");
+```
+
+```typescript With Bot Instance
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const uuid = randomUUID();
+const auth = new MongoAuth(uuid, collection);
+const bot = new Bot({ auth });
+
+// Logout and remove session
+bot.on("open", async (account) => {
+  console.log("Logged in as:", account.name);
+  
+  // Later: logout and remove
+  await bot.logout();
+  await auth.remove();
+  
+  console.log("Logged out and session removed");
+});
+```
+
+</CodeGroup>
+
+<Warning>
+  This operation is irreversible. After calling `remove()`, the bot will need to re-authenticate (scan QR code or enter OTP) on next startup.
+</Warning>
+
+---
+
+## Storage Details
+
+### Document Structure
+
+Each session data point is stored as a separate document:
+
+```typescript
+{
+  _id: ObjectId("..."),
+  uuid: "550e8400-e29b-41d4-a716-446655440000",
+  key: "5f4dcc3b5aa765d61d8327deb882cf99",
+  encrypted: "AES-encrypted-base64-string..."
+}
+```
+
+### Field Descriptions
+
+<ResponseField name="_id" type="ObjectId">
+  MongoDB's unique document identifier, automatically generated.
+</ResponseField>
+
+<ResponseField name="uuid" type="UUID">
+  The bot's unique identifier. Used to query all documents belonging to a specific bot session.
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  MD5 hash of the original key name (e.g., "creds", "pre-key-1"). Ensures consistent document identification.
+</ResponseField>
+
+<ResponseField name="encrypted" type="string">
+  Base64-encoded AES-256-GCM encrypted data. Contains the actual session information.
+</ResponseField>
+
+### Indexes
+
+Create these indexes for optimal performance:
+
+```typescript
+// Compound index for fast lookups
+await collection.createIndex({ uuid: 1, key: 1 }, { unique: true });
+
+// Index for bulk operations
+await collection.createIndex({ uuid: 1 });
+```
+
+### Encryption
+
+<Tabs>
+  <Tab title="Algorithm">
+    - **Cipher**: AES-256-GCM (Galois/Counter Mode)
+    - **Key**: Derived from the bot's UUID
+    - **Security**: Authenticated encryption with associated data (AEAD)
+    - **Format**: Encrypted data stored as base64 strings
+  </Tab>
+  <Tab title="Process">
+    1. Original data is JSON-stringified
+    2. Buffers are converted to base64 strings
+    3. Result is encrypted with AES-256-GCM
+    4. Encrypted bytes are base64-encoded
+    5. Base64 string is stored in MongoDB
+  </Tab>
+  <Tab title="Decryption">
+    1. Fetch document from MongoDB
+    2. Base64-decode the encrypted field
+    3. Decrypt using AES-256-GCM with UUID key
+    4. Parse JSON and restore Buffer objects
+    5. Return deserialized data
+  </Tab>
+</Tabs>
+
+---
+
+## Complete Examples
+
+<CodeGroup>
+
+```typescript Basic Bot
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect(
+  process.env.MONGODB_URI || "mongodb://localhost:27017"
+);
+
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const uuid = randomUUID();
+const auth = new MongoAuth(uuid, collection);
+const bot = new Bot({ auth });
+
+bot.on("qr", (qr) => {
+  console.log("Scan this QR code:", qr);
+});
+
+bot.on("open", (account) => {
+  console.log("Connected as:", account.name);
+});
+
+bot.command("hello", (ctx) => {
+  ctx.reply("Hello from MongoAuth!");
+});
+
+await bot.launch();
+```
+
+```typescript Multi-Bot Setup
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+// Create indexes for performance
+await collection.createIndex(
+  { uuid: 1, key: 1 },
+  { unique: true }
+);
+
+// Create multiple bots
+const bots = await Promise.all(
+  Array.from({ length: 5 }, async (_, i) => {
+    const uuid = randomUUID();
+    const auth = new MongoAuth(uuid, collection);
+    const bot = new Bot({ auth });
+    
+    bot.on("open", (account) => {
+      console.log(`Bot ${i + 1} connected:`, account.name);
+    });
+    
+    return bot;
+  })
+);
+
+// Launch all bots
+await Promise.all(bots.map(bot => bot.launch()));
+```
+
+```typescript Session Management Dashboard
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+// List all active sessions
+async function listSessions() {
+  const sessions = await collection.distinct("uuid");
+  console.log("Active sessions:", sessions);
+  return sessions;
+}
+
+// Count documents per session
+async function sessionStats(uuid: string) {
+  const count = await collection.countDocuments({ uuid });
+  const docs = await collection.find({ uuid }).toArray();
+  return {
+    uuid,
+    documentCount: count,
+    keys: docs.map(d => d.key),
+  };
+}
+
+// Remove specific session
+async function removeSession(uuid: string) {
+  const result = await collection.deleteMany({ uuid });
+  console.log(`Removed ${result.deletedCount} documents`);
+}
+
+// Usage
+const sessions = await listSessions();
+for (const uuid of sessions) {
+  const stats = await sessionStats(uuid);
+  console.log(stats);
+}
+```
+
+```typescript With Connection Pooling
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = new MongoClient(
+  process.env.MONGODB_URI || "mongodb://localhost:27017",
+  {
+    maxPoolSize: 10,
+    minPoolSize: 2,
+    maxIdleTimeMS: 60000,
+    serverSelectionTimeoutMS: 5000,
+  }
+);
+
+await client.connect();
+
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+// Monitor connection events
+client.on("connectionPoolCreated", () => {
+  console.log("MongoDB pool created");
+});
+
+client.on("connectionPoolClosed", () => {
+  console.log("MongoDB pool closed");
+});
+
+const auth = new MongoAuth(randomUUID(), collection);
+const bot = new Bot({ auth });
+
+await bot.launch();
+```
+
+```typescript Graceful Shutdown
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const client = await MongoClient.connect("mongodb://localhost:27017");
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const uuid = randomUUID();
+const auth = new MongoAuth(uuid, collection);
+const bot = new Bot({ auth });
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("Shutting down gracefully...");
+  
+  try {
+    // Close bot connection
+    await bot.close();
+    
+    // Close MongoDB connection
+    await client.close();
+    
+    console.log("Cleanup complete");
+    process.exit(0);
+  } catch (error) {
+    console.error("Error during shutdown:", error);
+    process.exit(1);
+  }
+});
+
+bot.command("shutdown", async (ctx) => {
+  await ctx.reply("Shutting down...");
+  process.kill(process.pid, "SIGINT");
+});
+
+await bot.launch();
+```
+
+</CodeGroup>
+
+---
+
+## Advanced Configuration
+
+### MongoDB Atlas
+
+Connect to MongoDB Atlas for cloud-hosted storage:
+
+```typescript
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient, ServerApiVersion } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const uri = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASS}@cluster.mongodb.net/?retryWrites=true&w=majority`;
+
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+});
+
+await client.connect();
+const db = client.db("production");
+const collection = db.collection("wapi_sessions");
+
+const auth = new MongoAuth(randomUUID(), collection);
+const bot = new Bot({ auth });
+
+await bot.launch();
+```
+
+### Replica Sets
+
+Connect to MongoDB replica set for high availability:
+
+```typescript
+import { Bot, MongoAuth } from "wapi";
+import { MongoClient } from "mongodb";
+import { randomUUID } from "node:crypto";
+
+const uri = "mongodb://host1:27017,host2:27017,host3:27017/?replicaSet=myReplicaSet";
+
+const client = new MongoClient(uri, {
+  readPreference: "primaryPreferred",
+  w: "majority",
+  retryWrites: true,
+});
+
+await client.connect();
+const db = client.db("wapi");
+const collection = db.collection("sessions");
+
+const auth = new MongoAuth(randomUUID(), collection);
+const bot = new Bot({ auth });
+
+await bot.launch();
+```
+
+### Session Analytics
+
+Implement analytics using MongoDB aggregation:
+
+```typescript
+// Count sessions by creation date
+const sessionsByDate = await collection.aggregate([
+  {
+    $group: {
+      _id: { $dateToString: { format: "%Y-%m-%d", date: "$_id" } },
+      count: { $sum: 1 },
+    },
+  },
+  { $sort: { _id: -1 } },
+]).toArray();
+
+// Find largest sessions
+const largestSessions = await collection.aggregate([
+  {
+    $group: {
+      _id: "$uuid",
+      documentCount: { $sum: 1 },
+      totalSize: { $sum: { $bsonSize: "$$ROOT" } },
+    },
+  },
+  { $sort: { totalSize: -1 } },
+  { $limit: 10 },
+]).toArray();
+
+console.log("Largest sessions:", largestSessions);
+```
+
+---
+
+## Advantages
+
+<Tabs>
+  <Tab title="Persistence">
+    ✅ Durable storage  
+    ✅ Backup & restore  
+    ✅ Point-in-time recovery  
+    ✅ Data retention policies  
+    ✅ Archive capabilities
+  </Tab>
+  <Tab title="Scalability">
+    📈 Horizontal scaling  
+    📈 Sharding support  
+    📈 Replica sets  
+    📈 Load distribution  
+    📈 Handle millions of sessions
+  </Tab>
+  <Tab title="Query Power">
+    🔍 Complex queries  
+    🔍 Aggregation pipelines  
+    🔍 Full-text search  
+    🔍 Geospatial queries  
+    🔍 Analytics capabilities
+  </Tab>
+  <Tab title="Management">
+    🛠️ Centralized control  
+    🛠️ Audit trails  
+    🛠️ Session monitoring  
+    🛠️ User management  
+    🛠️ Admin dashboards
+  </Tab>
+</Tabs>
+
+---
+
+## Best Practices
+
+<Note>
+  Follow these recommendations for optimal performance and reliability:
+</Note>
+
+### 1. Indexing Strategy
+
+```typescript
+// Create compound index for lookups
+await collection.createIndex(
+  { uuid: 1, key: 1 },
+  { unique: true, background: true }
+);
+
+// Create index for bulk operations
+await collection.createIndex(
+  { uuid: 1 },
+  { background: true }
+);
+```
+
+### 2. Connection Reuse
+
+```typescript
+// ✅ Good: Reuse MongoDB client
+const client = await MongoClient.connect(uri);
+const collection = client.db("wapi").collection("sessions");
+
+const auth1 = new MongoAuth(uuid1, collection);
+const auth2 = new MongoAuth(uuid2, collection);
+
+// ❌ Bad: Create new connection per bot
+const auth1 = new MongoAuth(
+  uuid1,
+  (await MongoClient.connect(uri)).db("wapi").collection("sessions")
+);
+```
+
+### 3. Error Handling
+
+```typescript
+try {
+  await client.connect();
+  await client.db("admin").command({ ping: 1 });
+  console.log("MongoDB connected successfully");
+} catch (error) {
+  console.error("MongoDB connection failed:", error);
+  process.exit(1);
+}
+```
+
+### 4. Data Cleanup
+
+```typescript
+// Remove stale sessions periodically
+setInterval(async () => {
+  const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days
+  
+  const result = await collection.deleteMany({
+    _id: { $lt: cutoffDate },
+  });
+  
+  console.log(`Cleaned up ${result.deletedCount} stale documents`);
+}, 24 * 60 * 60 * 1000); // Daily
+```
+
+---
+
+## Troubleshooting
+
+### Connection Issues
+
+<Expandable title="Cannot connect to MongoDB">
+  ```typescript
+  // Test connection
+  try {
+    await client.connect();
+    await client.db("admin").command({ ping: 1 });
+    console.log("Successfully connected to MongoDB");
+  } catch (error) {
+    console.error("Connection failed:", error);
+  }
+  ```
+</Expandable>
+
+<Expandable title="Authentication errors">
+  ```typescript
+  const client = new MongoClient(uri, {
+    auth: {
+      username: process.env.MONGO_USER,
+      password: process.env.MONGO_PASS,
+    },
+    authSource: "admin",
+  });
+  ```
+</Expandable>
+
+### Performance Issues
+
+<Expandable title="Slow queries">
+  - Create appropriate indexes
+  - Use `explain()` to analyze queries
+  - Enable profiling: `db.setProfilingLevel(1, { slowms: 100 })`
+  - Monitor with MongoDB Atlas Performance Advisor
+</Expandable>
+
+<Expandable title="High memory usage">
+  - Implement document size limits
+  - Use projections to fetch only needed fields
+  - Enable compression: `compressors: ["snappy", "zlib"]`
+  - Monitor collection stats: `db.collection.stats()`
+</Expandable>
+
+---
+
+## When to Use
+
+<Tabs>
+  <Tab title="Use MongoAuth">
+    ✅ Long-term persistence  
+    ✅ Audit trail requirements  
+    ✅ Complex querying needs  
+    ✅ Centralized management  
+    ✅ Existing MongoDB infrastructure  
+    ✅ Session analytics  
+    ✅ Multi-tenant applications
+  </Tab>
+  <Tab title="Use RedisAuth">
+    ⚡ Speed priority  
+    ⚡ Session migration  
+    ⚡ High-availability  
+    ⚡ Temporary sessions
+  </Tab>
+  <Tab title="Use LocalAuth">
+    📁 Single-server deployments  
+    📁 Development/testing  
+    📁 Minimal dependencies
+  </Tab>
+</Tabs>
+
+---
+
+## See Also
+
+- [LocalAuth](/api/auth/local) - Filesystem-based authentication
+- [RedisAuth](/api/auth/redis) - Redis-based authentication  
+- [Bot Class](/api/bot) - Main bot class
+- [MongoDB Node.js Driver](https://www.mongodb.com/docs/drivers/node/current/) - Official MongoDB driver documentation

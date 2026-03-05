@@ -1,0 +1,772 @@
+---
+title: "RedisAuth"
+description: "Store WhatsApp sessions in Redis for distributed deployments"
+---
+
+## Overview
+
+The `RedisAuth` class provides persistent authentication storage using Redis. It enables distributed bot deployments by storing encrypted session data in a centralized Redis server, allowing multiple bot instances to share or migrate sessions seamlessly.
+
+### Key Features
+
+- **Distributed Storage**: Share sessions across multiple servers
+- **Encrypted Storage**: All session data encrypted with AES-256-GCM
+- **High Availability**: Leverage Redis replication and clustering
+- **Fast Access**: In-memory storage for sub-millisecond latency
+- **Session Migration**: Move sessions between servers effortlessly
+- **Automatic Expiry**: Optional TTL support for session management
+
+<Note>
+  RedisAuth is ideal for production environments with multiple servers, load balancing, or high-availability requirements.
+</Note>
+
+---
+
+## Installation
+
+RedisAuth requires the `ioredis` package:
+
+<CodeGroup>
+
+```bash npm
+npm install ioredis
+```
+
+```bash yarn
+yarn add ioredis
+```
+
+```bash pnpm
+pnpm add ioredis
+```
+
+</CodeGroup>
+
+---
+
+## Constructor
+
+### `new RedisAuth(uuid, redis, prefix)`
+
+Creates a new RedisAuth instance for managing bot authentication in Redis.
+
+<ParamField path="uuid" type="UUID" required>
+  A valid UUID (v4) that uniquely identifies this bot instance. This UUID is used as the encryption key and as part of the Redis key namespace.
+</ParamField>
+
+<ParamField path="redis" type="Redis" required>
+  An ioredis client instance. This can be a standalone Redis connection, a cluster, or a sentinel configuration.
+</ParamField>
+
+<ParamField path="prefix" type="string" required>
+  A string prefix for Redis keys. This helps organize keys and avoid collisions. The final key format is `{prefix}:{uuid}:{hash}`.
+</ParamField>
+
+#### Example
+
+<CodeGroup>
+
+```typescript Basic Usage
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis({
+  host: "localhost",
+  port: 6379,
+});
+
+const uuid = randomUUID();
+const auth = new RedisAuth(uuid, redis, "wapi");
+
+const bot = new Bot({ auth });
+```
+
+```typescript Redis URL
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+// Connect using Redis URL
+const redis = new Redis("redis://localhost:6379/0");
+
+const auth = new RedisAuth(
+  randomUUID(),
+  redis,
+  "wapi"
+);
+
+const bot = new Bot({ auth });
+```
+
+```typescript Redis Cluster
+import { Bot, RedisAuth } from "wapi";
+import { Cluster } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Cluster([
+  { host: "127.0.0.1", port: 7000 },
+  { host: "127.0.0.1", port: 7001 },
+  { host: "127.0.0.1", port: 7002 },
+]);
+
+const auth = new RedisAuth(
+  randomUUID(),
+  redis,
+  "wapi"
+);
+
+const bot = new Bot({ auth });
+```
+
+```typescript With Authentication
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis({
+  host: "redis.example.com",
+  port: 6379,
+  password: process.env.REDIS_PASSWORD,
+  db: 0,
+  tls: {
+    // TLS options for secure connections
+  },
+});
+
+const auth = new RedisAuth(
+  randomUUID(),
+  redis,
+  "wapi"
+);
+
+const bot = new Bot({ auth });
+```
+
+</CodeGroup>
+
+#### Throws
+
+- `Error`: If the provided UUID is not a valid UUID v4 format
+
+---
+
+## Properties
+
+### `uuid`
+
+<ResponseField name="uuid" type="UUID">
+  The UUID associated with this authentication instance. This is the same UUID provided to the constructor.
+</ResponseField>
+
+```typescript
+const auth = new RedisAuth(uuid, redis, "wapi");
+console.log(auth.uuid); // "550e8400-e29b-41d4-a716-446655440000"
+```
+
+---
+
+## Methods
+
+### `init()`
+
+Initializes the authentication system by loading or creating credentials and setting up the key store.
+
+<CodeGroup>
+
+```typescript Signature
+init(): Promise<IBotAuthInit>
+```
+
+```typescript Interface
+interface IBotAuthInit {
+  creds: AuthenticationCreds;
+  keys: SignalKeyStore;
+}
+```
+
+</CodeGroup>
+
+#### Behavior
+
+1. **Credential Loading**: Attempts to load existing credentials from Redis
+2. **New Session**: If no credentials exist, generates new authentication credentials
+3. **Key Store Setup**: Initializes the Signal protocol key store for WhatsApp encryption
+4. **Cache Population**: Populates the in-memory cache with encrypted data
+
+#### Returns
+
+<Expandable title="IBotAuthInit">
+  <ResponseField name="creds" type="AuthenticationCreds">
+    WhatsApp authentication credentials containing account information, encryption keys, and session state. This is managed internally by the Baileys library.
+  </ResponseField>
+
+  <ResponseField name="keys" type="SignalKeyStore">
+    The Signal protocol key store used for end-to-end encryption. Provides `get()` and `set()` methods for managing cryptographic keys.
+  </ResponseField>
+</Expandable>
+
+#### Example
+
+```typescript
+import { RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis();
+const auth = new RedisAuth(randomUUID(), redis, "wapi");
+
+// Initialize authentication
+const { creds, keys } = await auth.init();
+
+console.log("Credentials loaded:", !!creds);
+console.log("Keys initialized:", !!keys);
+```
+
+<Note>
+  This method is called automatically by the `Bot` class during initialization. You rarely need to call it directly.
+</Note>
+
+---
+
+### `save()`
+
+Persists the current authentication credentials to Redis.
+
+```typescript
+save(): Promise<void>
+```
+
+#### Behavior
+
+1. **Validation**: Ensures credentials have been loaded via `init()`
+2. **Serialization**: Converts credentials to JSON format
+3. **Encryption**: Encrypts the data using AES-256-GCM
+4. **Persistence**: Writes the encrypted data to Redis
+5. **Cache Update**: Updates the in-memory cache
+
+#### Throws
+
+- `Error`: If credentials haven't been initialized ("Credentials not loaded.")
+
+#### Example
+
+```typescript
+import { RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis();
+const auth = new RedisAuth(randomUUID(), redis, "wapi");
+
+// Initialize and save
+await auth.init();
+await auth.save();
+
+console.log("Session saved to Redis");
+```
+
+<Warning>
+  The `Bot` class automatically saves credentials when authentication state changes. Manual calls to `save()` are typically unnecessary.
+</Warning>
+
+---
+
+### `remove()`
+
+Deletes all authentication data from Redis and clears the cache.
+
+```typescript
+remove(): Promise<void>
+```
+
+#### Behavior
+
+1. **Key Discovery**: Finds all Redis keys matching the session prefix
+2. **Batch Deletion**: Deletes all matching keys in a single operation
+3. **Cache Clearing**: Clears the in-memory cache
+
+#### Example
+
+<CodeGroup>
+
+```typescript Basic Removal
+import { RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis();
+const uuid = randomUUID();
+const auth = new RedisAuth(uuid, redis, "wapi");
+
+// Remove session data
+await auth.remove();
+console.log("Session removed from Redis");
+```
+
+```typescript With Bot Instance
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis();
+const uuid = randomUUID();
+const auth = new RedisAuth(uuid, redis, "wapi");
+const bot = new Bot({ auth });
+
+// Logout and remove session
+bot.on("open", async (account) => {
+  console.log("Logged in as:", account.name);
+  
+  // Later: logout and remove
+  await bot.logout();
+  await auth.remove();
+  
+  console.log("Logged out and session removed");
+});
+```
+
+</CodeGroup>
+
+<Warning>
+  This operation is irreversible. After calling `remove()`, the bot will need to re-authenticate (scan QR code or enter OTP) on next startup.
+</Warning>
+
+---
+
+## Storage Details
+
+### Key Structure
+
+Redis keys follow this pattern:
+
+```
+{prefix}:{uuid}:{md5_hash}
+```
+
+Example:
+```
+wapi:550e8400-e29b-41d4-a716-446655440000:5f4dcc3b5aa765d61d8327deb882cf99
+```
+
+### Key Naming
+
+- Each data key (e.g., "creds", "pre-key-1") is MD5-hashed
+- The hash becomes the final segment of the Redis key
+- Example: `creds` → `wapi:550e8400-...:5f4dcc3b5aa765d61d8327deb882cf99`
+
+### Value Format
+
+<Tabs>
+  <Tab title="Storage">
+    - Values are stored as binary buffers
+    - Retrieved using `getBuffer()` for efficiency
+    - Encrypted with AES-256-GCM before storage
+  </Tab>
+  <Tab title="Encryption">
+    - **Cipher**: AES-256-GCM (Galois/Counter Mode)
+    - **Key**: Derived from the bot's UUID
+    - **Security**: Authenticated encryption with associated data (AEAD)
+  </Tab>
+  <Tab title="Serialization">
+    1. Original data is JSON-stringified
+    2. Buffers are converted to base64 strings
+    3. Result is encrypted with AES-256-GCM
+    4. Encrypted bytes are stored in Redis
+  </Tab>
+</Tabs>
+
+---
+
+## Complete Examples
+
+<CodeGroup>
+
+```typescript Basic Bot
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis({
+  host: process.env.REDIS_HOST || "localhost",
+  port: parseInt(process.env.REDIS_PORT || "6379"),
+});
+
+const uuid = randomUUID();
+const auth = new RedisAuth(uuid, redis, "wapi");
+const bot = new Bot({ auth });
+
+bot.on("qr", (qr) => {
+  console.log("Scan this QR code:", qr);
+});
+
+bot.on("open", (account) => {
+  console.log("Connected as:", account.name);
+});
+
+bot.command("hello", (ctx) => {
+  ctx.reply("Hello from RedisAuth!");
+});
+
+bot.launch();
+```
+
+```typescript Multi-Bot Setup
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+// Shared Redis instance
+const redis = new Redis();
+
+// Create multiple bots sharing the same Redis
+const bot1 = new Bot({
+  auth: new RedisAuth(randomUUID(), redis, "wapi")
+});
+
+const bot2 = new Bot({
+  auth: new RedisAuth(randomUUID(), redis, "wapi")
+});
+
+bot1.on("open", (account) => {
+  console.log("Bot 1 connected:", account.name);
+});
+
+bot2.on("open", (account) => {
+  console.log("Bot 2 connected:", account.name);
+});
+
+Promise.all([
+  bot1.launch(),
+  bot2.launch(),
+]);
+```
+
+```typescript Session Migration
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+
+// Server 1: Create and authenticate
+const redis1 = new Redis();
+const uuid = "550e8400-e29b-41d4-a716-446655440000";
+const auth1 = new RedisAuth(uuid, redis1, "wapi");
+const bot1 = new Bot({ auth: auth1 });
+
+await bot1.launch();
+// Bot authenticates and session is stored in Redis
+
+// Server 2: Reuse the same session
+const redis2 = new Redis();
+const auth2 = new RedisAuth(uuid, redis2, "wapi"); // Same UUID!
+const bot2 = new Bot({ auth: auth2 });
+
+await bot2.launch();
+// Bot2 loads the existing session from Redis
+// No QR code scan needed!
+```
+
+```typescript With Connection Pool
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+// Configure connection pool
+const redis = new Redis({
+  host: "localhost",
+  port: 6379,
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+  enableOfflineQueue: true,
+  connectTimeout: 10000,
+});
+
+// Handle Redis connection events
+redis.on("connect", () => {
+  console.log("Redis connected");
+});
+
+redis.on("error", (err) => {
+  console.error("Redis error:", err);
+});
+
+const auth = new RedisAuth(
+  randomUUID(),
+  redis,
+  "wapi"
+);
+
+const bot = new Bot({ auth });
+bot.launch();
+```
+
+```typescript With Cleanup
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis();
+const uuid = randomUUID();
+const auth = new RedisAuth(uuid, redis, "wapi");
+const bot = new Bot({ auth });
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("Shutting down...");
+  
+  // Close bot connection
+  await bot.close();
+  
+  // Close Redis connection
+  await redis.quit();
+  
+  console.log("Cleanup complete");
+  process.exit(0);
+});
+
+bot.command("logout", async (ctx) => {
+  await ctx.reply("Logging out...");
+  await bot.logout();
+  await auth.remove();
+  await redis.quit();
+  process.exit(0);
+});
+
+bot.launch();
+```
+
+</CodeGroup>
+
+---
+
+## Advanced Configuration
+
+### Redis Sentinel
+
+For high availability, use Redis Sentinel:
+
+```typescript
+import { Bot, RedisAuth } from "wapi";
+import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Redis({
+  sentinels: [
+    { host: "sentinel-1", port: 26379 },
+    { host: "sentinel-2", port: 26379 },
+    { host: "sentinel-3", port: 26379 },
+  ],
+  name: "mymaster",
+});
+
+const auth = new RedisAuth(
+  randomUUID(),
+  redis,
+  "wapi"
+);
+
+const bot = new Bot({ auth });
+bot.launch();
+```
+
+### Redis Cluster
+
+For horizontal scaling:
+
+```typescript
+import { Bot, RedisAuth } from "wapi";
+import { Cluster } from "ioredis";
+import { randomUUID } from "node:crypto";
+
+const redis = new Cluster([
+  { host: "node1.redis.example.com", port: 7000 },
+  { host: "node2.redis.example.com", port: 7001 },
+  { host: "node3.redis.example.com", port: 7002 },
+], {
+  redisOptions: {
+    password: process.env.REDIS_PASSWORD,
+  },
+});
+
+const auth = new RedisAuth(
+  randomUUID(),
+  redis,
+  "wapi"
+);
+
+const bot = new Bot({ auth });
+bot.launch();
+```
+
+---
+
+## Advantages
+
+<Tabs>
+  <Tab title="Scalability">
+    ✅ Horizontal scaling  
+    ✅ Load balancing support  
+    ✅ Multiple bot instances  
+    ✅ Session sharing  
+    ✅ Zero downtime deployments
+  </Tab>
+  <Tab title="Performance">
+    ⚡ In-memory storage  
+    ⚡ Sub-millisecond latency  
+    ⚡ Efficient caching  
+    ⚡ Optimized for reads  
+    ⚡ Batch operations
+  </Tab>
+  <Tab title="Reliability">
+    🛡️ High availability  
+    🛡️ Replication support  
+    🛡️ Persistence options  
+    🛡️ Automatic failover  
+    🛡️ Data durability
+  </Tab>
+  <Tab title="Security">
+    🔒 AES-256-GCM encryption  
+    🔒 TLS support  
+    🔒 Password authentication  
+    🔒 Network isolation  
+    🔒 No plaintext storage
+  </Tab>
+</Tabs>
+
+---
+
+## Best Practices
+
+<Note>
+  Follow these recommendations for optimal performance and reliability:
+</Note>
+
+### 1. Connection Management
+
+```typescript
+// ✅ Good: Reuse Redis connections
+const redis = new Redis();
+const auth1 = new RedisAuth(uuid1, redis, "wapi");
+const auth2 = new RedisAuth(uuid2, redis, "wapi");
+
+// ❌ Bad: Create new connection per bot
+const auth1 = new RedisAuth(uuid1, new Redis(), "wapi");
+const auth2 = new RedisAuth(uuid2, new Redis(), "wapi");
+```
+
+### 2. Error Handling
+
+```typescript
+const redis = new Redis();
+
+redis.on("error", (err) => {
+  console.error("Redis connection error:", err);
+  // Implement retry logic or alerting
+});
+
+redis.on("close", () => {
+  console.warn("Redis connection closed");
+});
+```
+
+### 3. Prefix Naming
+
+```typescript
+// ✅ Good: Descriptive, environment-aware prefixes
+const prefix = `wapi:${process.env.NODE_ENV}:v1`;
+const auth = new RedisAuth(uuid, redis, prefix);
+
+// ❌ Bad: Generic prefix
+const auth = new RedisAuth(uuid, redis, "bot");
+```
+
+### 4. Graceful Shutdown
+
+```typescript
+process.on("SIGTERM", async () => {
+  await bot.close();
+  await redis.quit(); // Graceful disconnect
+  process.exit(0);
+});
+```
+
+---
+
+## Troubleshooting
+
+### Connection Issues
+
+<Expandable title="Cannot connect to Redis">
+  ```typescript
+  // Check connection with ping
+  try {
+    await redis.ping();
+    console.log("Redis is connected");
+  } catch (error) {
+    console.error("Redis connection failed:", error);
+  }
+  ```
+</Expandable>
+
+<Expandable title="Authentication failures">
+  ```typescript
+  const redis = new Redis({
+    host: "localhost",
+    port: 6379,
+    password: process.env.REDIS_PASSWORD,
+    showFriendlyErrorStack: true, // Better error messages
+  });
+  ```
+</Expandable>
+
+### Performance Issues
+
+<Expandable title="High latency">
+  - Enable connection pooling
+  - Use Redis cluster for distribution
+  - Check network latency between servers
+  - Monitor Redis memory usage
+</Expandable>
+
+<Expandable title="Memory consumption">
+  ```typescript
+  // Implement TTL for sessions (optional)
+  // Note: This requires custom implementation
+  await redis.expire(`wapi:${uuid}:*`, 7 * 24 * 60 * 60); // 7 days
+  ```
+</Expandable>
+
+---
+
+## When to Use
+
+<Tabs>
+  <Tab title="Use RedisAuth">
+    ✅ Multi-server deployments  
+    ✅ Load-balanced environments  
+    ✅ High-availability requirements  
+    ✅ Session migration needs  
+    ✅ Existing Redis infrastructure  
+    ✅ Fast session access required
+  </Tab>
+  <Tab title="Use LocalAuth">
+    📁 Single-server deployments  
+    📁 Development/testing  
+    📁 Minimal dependencies  
+    📁 Simple setups
+  </Tab>
+  <Tab title="Use MongoAuth">
+    🗄️ Long-term persistence priority  
+    🗄️ Complex queries needed  
+    🗄️ Audit trails required  
+    🗄️ Existing MongoDB infrastructure
+  </Tab>
+</Tabs>
+
+---
+
+## See Also
+
+- [LocalAuth](/api/auth/local) - Filesystem-based authentication
+- [MongoAuth](/api/auth/mongo) - MongoDB-based authentication
+- [Bot Class](/api/bot) - Main bot class
+- [ioredis Documentation](https://github.com/redis/ioredis) - Redis client library
